@@ -1,0 +1,39 @@
+{
+  "framework": null,
+  "installCommand": "rm -rf node_modules && ( [ -f package-lock.json ] && npm ci || npm install )",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    }
+  ],
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 300,
+      "includeFiles": "node_modules/**"
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    },
+    {
+      "source": "/js/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/generate-daily",
+      "schedule": "0 21 * * *"
+    }
+  ]
+}

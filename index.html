@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>學中文 · Học Tiếng Trung</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" crossorigin="anonymous">
+<link rel="stylesheet" href="/css/styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<div id="auth-gate">
+  <div class="auth-box">
+    <div class="auth-title">🀄 學中文</div>
+    <div class="auth-sub">Đăng nhập để lưu tiến độ học riêng của bạn</div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="auth-tab-login" onclick="authSwitchTab('login')">Đăng nhập</button>
+      <button class="auth-tab" id="auth-tab-register" onclick="authSwitchTab('register')">Đăng ký</button>
+    </div>
+    <div class="auth-note" id="auth-note"></div>
+    <div class="auth-error" id="auth-error"></div>
+    <div class="auth-field">
+      <label>Tên đăng nhập</label>
+      <input type="text" id="auth-username" autocomplete="username" placeholder="vd: minh123">
+    </div>
+    <div class="auth-field">
+      <label>Mật khẩu</label>
+      <input type="password" id="auth-password" autocomplete="current-password" placeholder="••••••">
+    </div>
+    <button class="auth-submit" id="auth-submit" onclick="authSubmit()">Đăng nhập</button>
+  </div>
+</div>
+
+<div id="account-menu" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:998;display:none;align-items:center;justify-content:center;padding:20px;">
+  <div class="auth-box" style="max-width:320px;">
+    <div class="auth-title" id="account-menu-name">👤</div>
+    <button class="auth-submit" style="margin-top:10px" onclick="closeAccountMenu(); openChangePassword();">🔑 Đổi mật khẩu</button>
+    <button class="auth-submit" style="margin-top:10px;background:var(--l9a);box-shadow:0 4px 0 #3d4bb0;" onclick="closeAccountMenu(); openOptimizerModal();">🧠 FSRS Optimizer</button>
+    <button class="auth-submit" style="margin-top:10px;background:var(--l7a);box-shadow:0 4px 0 #b25f22;" onclick="openDangerConfirm('fsrs-reset')">🔄 Reset FSRS</button>
+    <button class="auth-submit" style="margin-top:10px;background:var(--fail);box-shadow:0 4px 0 #c23a3a;" onclick="openDangerConfirm('wipe-data')">🗑️ Xoá toàn bộ dữ liệu học tập</button>
+    <button class="auth-submit" style="margin-top:10px;background:var(--fail);" onclick="closeAccountMenu(); if(confirm('Đăng xuất khỏi tài khoản này?')) authLogout();">🚪 Đăng xuất</button>
+    <button class="auth-guest" onclick="closeAccountMenu()">Đóng</button>
+  </div>
+</div>
+
+<!-- V76 (Yêu cầu 6/7/9): modal xác nhận DÙNG CHUNG cho cả "Reset FSRS" và "Xoá toàn bộ dữ liệu học
+     tập" — nội dung/màu nút đổi động theo hành động qua openDangerConfirm(kind) (xem js/settings.js),
+     tránh lặp lại gần như y hệt 1 khối modal 2 lần. Bắt buộc gõ đúng chữ RESET mới cho xác nhận. -->
+<div id="danger-confirm-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:none;align-items:center;justify-content:center;padding:20px;">
+  <div class="auth-box" style="max-width:340px;">
+    <div class="auth-title" id="danger-confirm-title">⚠️</div>
+    <div style="color:var(--muted);font-size:.82rem;text-align:center;margin-bottom:10px;line-height:1.5;" id="danger-confirm-desc"></div>
+    <div style="font-weight:800;font-size:.85rem;text-align:center;margin-bottom:12px;white-space:pre-line;color:var(--ink);" id="danger-confirm-question"></div>
+    <div class="auth-error" id="danger-confirm-error"></div>
+    <div class="auth-field">
+      <label>Gõ "RESET" (viết hoa) để xác nhận</label>
+      <input type="text" id="danger-confirm-input" autocomplete="off" placeholder="RESET">
+    </div>
+    <button class="auth-submit" id="danger-confirm-submit" onclick="submitDangerConfirm()">Xác nhận</button>
+    <button class="auth-guest" onclick="closeDangerConfirm()">Huỷ</button>
+  </div>
+</div>
+
+<!-- V82 (FSRS Personal Optimizer) — modal tự phục vụ: audit dữ liệu → chạy optimizer → so sánh
+     default/personal → Apply/Rollback/Reset. Toàn bộ logic ở js/fsrs-optimizer.js. Rộng hơn các
+     modal khác (440px) vì cần hiện lưới KPI + bảng so sánh, nhưng vẫn dùng LẠI đúng các class sẵn
+     có (.dash-kpi*, .btn, .auth-*) — không cần dashboard riêng (đúng yêu cầu "không cần phức tạp"). -->
+<div id="optimizer-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;display:none;align-items:center;justify-content:center;padding:20px;">
+  <div class="auth-box" style="max-width:440px;max-height:88vh;overflow-y:auto;">
+    <div class="auth-title">🧠 FSRS Optimizer</div>
+    <div style="color:var(--muted);font-size:.78rem;text-align:center;margin-bottom:14px;line-height:1.5;">
+      Tìm bộ tham số ghi nhớ (weights) RIÊNG cho bạn, dựa trên lịch sử ôn tập thật — thay vì dùng bộ mặc định chung cho mọi người.
+    </div>
+    <div id="optimizer-body">
+      <div class="study-empty">⏳ Đang tải...</div>
+    </div>
+    <button class="auth-guest" onclick="closeOptimizerModal()">Đóng</button>
+  </div>
+</div>
+
+
+<div id="pw-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:998;display:none;align-items:center;justify-content:center;padding:20px;">
+  <div class="auth-box" style="max-width:320px;">
+    <div class="auth-title">🔑 Đổi mật khẩu</div>
+    <div class="auth-error" id="pw-error"></div>
+    <div class="auth-field">
+      <label>Mật khẩu hiện tại</label>
+      <input type="password" id="pw-old" autocomplete="current-password" placeholder="••••••">
+    </div>
+    <div class="auth-field">
+      <label>Mật khẩu mới</label>
+      <input type="password" id="pw-new" autocomplete="new-password" placeholder="Tối thiểu 4 ký tự">
+    </div>
+    <div class="auth-field">
+      <label>Nhập lại mật khẩu mới</label>
+      <input type="password" id="pw-new2" autocomplete="new-password" placeholder="••••••">
+    </div>
+    <button class="auth-submit" id="pw-submit" onclick="submitChangePassword()">Đổi mật khẩu</button>
+    <button class="auth-guest" onclick="closeChangePassword()">Huỷ</button>
+  </div>
+</div>
+
+<div id="app-header">
+<div id="topbar">
+  <h1>🀄<span class="brand-text"> 學中文</span></h1>
+  <span id="streak-badge" title="Số ngày học liên tiếp">🔥 0</span>
+  <span id="study-timer-chip" style="display:none;background:var(--active-c,#e0e7ff);padding:3px 9px;border-radius:16px;font-size:.7rem;font-weight:800;color:var(--active-dark,#3730a3);"></span>
+  <button id="user-badge" onclick="authOpenMenu()">👤</button>
+  <button id="display-btn" class="display-btn" onclick="navToggleDisplay()" aria-label="Hiển thị" aria-expanded="false" title="Hiển thị">⚙️<i id="display-dot"></i></button>
+</div>
+<!-- V116: các nút giao diện gom vào 1 bảng (giữ nguyên id để code cũ cập nhật nhãn như trước) -->
+<div id="display-panel" style="display:none;">
+  <div class="dp-row">
+    <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn" title="Chế độ tối/sáng">🌙</button>
+    <div class="speed-control">
+      <label>🐢 Tốc độ đọc</label>
+      <input type="range" id="speed-slider" min="0.3" max="1.0" step="0.05" value="0.65" oninput="updateSpeed(this.value)">
+      <span class="speed-val" id="speed-val">0.65</span>
+    </div>
+  </div>
+  <div class="dp-row">
+    <button class="pinyin-toggle" onclick="togglePinyin()" id="py-toggle-btn">Ẩn Pinyin</button>
+    <button class="pinyin-toggle" onclick="toggleMeaning()" id="vi-toggle-btn">Ẩn nghĩa</button>
+    <button class="pinyin-toggle" onclick="toggleHanViet()" id="hv-toggle-btn">Ẩn Hán Việt</button>
+  </div>
+</div>
+</div>
+
+<div id="subnav" style="display:none;"></div>
+
+<div id="content"></div>
+
+<!-- V116: bảng "Thêm" (mở từ nút ⋯ ở thanh dưới). id tab-admin / tab-vocab giữ nguyên để auth.js bật/tắt theo quyền. -->
+<div id="more-sheet" style="display:none;">
+  <button onclick="goTab('compare')" id="tab-compare">🆚 So sánh</button>
+  <button onclick="goTab('aibank')" id="tab-aibank" style="display:none;">🤖 Thư viện AI</button>
+  <button onclick="goTab('ttsfix')" id="tab-ttsfix" style="display:none;">🔧 Sửa phát âm</button>
+  <button onclick="goTab('admin')" id="tab-admin" style="display:none;">🛠️ Quản trị</button>
+  <button onclick="goTab('vocab')" id="tab-vocab" style="display:none;">📚 Từ vựng</button>
+</div>
+
+<div id="nav" role="navigation" aria-label="Điều hướng chính">
+  <button onclick="goTab('home')" class="active" id="tab-home"><span class="nav-ic">🏠</span><span class="nav-lb">Trang chủ</span></button>
+  <button onclick="goTab('today')" id="tab-today"><span class="nav-ic">🎯</span><span class="nav-lb">Học</span></button>
+  <button onclick="navGoProgress()" id="tab-progress"><span class="nav-ic">📊</span><span class="nav-lb">Tiến bộ</span></button>
+  <button onclick="navToggleMore()" id="tab-more" aria-expanded="false"><span class="nav-ic">⋯</span><span class="nav-lb">Thêm</span></button>
+</div>
+
+<script src="/js/theme.js"></script>
+<script src="/js/data.js"></script>
+<script src="/js/distractor-engine.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/study-queue.js"></script>
+<script src="/js/study-session.js"></script>
+<script src="/js/timer.js"></script>
+<script src="/js/audio.js"></script>
+<script src="/js/tts-fix.js"></script>
+<script src="/js/ui.js"></script>
+<script src="/js/nav.js"></script>
+<script src="/js/navigation.js"></script>
+<script src="/js/lesson.js"></script>
+<script src="/js/visibility-timer.js"></script>
+<script src="/js/answer-match.js"></script>
+<script src="/js/skill-score.js"></script>
+<script src="/js/question-engine.js"></script>
+<script src="/js/question-selector.js"></script>
+<script src="/js/training-plan.js"></script>
+<script src="/js/session-summary.js"></script>
+<script src="/js/review.js"></script>
+<script src="/js/review-multi.js"></script>
+<script src="/js/ai-explain.js"></script>
+<script src="/js/ai-bank.js"></script>
+<script src="/js/study-workspace.js"></script>
+<script src="/js/flashcard.js"></script>
+<script src="/js/quiz.js"></script>
+<script src="/js/type.js"></script>
+<script src="/js/listen.js"></script>
+<script src="/js/translate.js"></script>
+<script src="/js/stats.js"></script>
+<script src="/js/skills-ui.js"></script>
+<script src="/js/skills-analysis.js"></script>
+<script src="/js/stroke.js"></script>
+<script src="/js/fsrs-optimizer.js"></script>
+<script src="/js/compare.js"></script>
+<script src="/js/admin.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

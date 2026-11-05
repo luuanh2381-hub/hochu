@@ -1,0 +1,350 @@
+// js/ui.js — State toàn cục (tab hiện tại, hiện/ẩn Pinyin·nghĩa·Hán Việt) + refreshCurrentCardDisplay() (vẽ lại thẻ đang học mà KHÔNG nạp lại hàng đợi)
+
+// V88 (Phần 4 — Audit XSS) — helper DÙNG CHUNG để nhúng dữ liệu (đặc biệt dữ liệu từ DB: hz/py/vi/
+// hanviet/tag/username...) an toàn vào HTML. KHÔNG được giả định dữ liệu DB luôn an toàn (vd hz/py/vi
+// hiện chỉ nhập được qua admin — nhưng admin cũng có thể bị chiếm quyền, và không nên phụ thuộc mãi
+// vào input-validation ở 1 nơi duy nhất — escape ở OUTPUT là lớp phòng thủ đúng chỗ nhất).
+//
+// escapeHtml(s): dùng khi chèn TRỰC TIẾP vào nội dung HTML (giữa 2 thẻ, hoặc trong 1 thuộc tính HTML
+// value="...") — encode &<>"' thành HTML entity. Cùng thuật toán với escapeHtml() cục bộ trong
+// js/admin.js (không đổi file đó — giữ nguyên, tránh rủi ro không cần thiết cho phần đã hoạt động
+// đúng) — thêm bản DÙNG CHUNG ở đây cho các file khác (compare.js/listen.js/stats.js/translate.js...)
+// chưa có sẵn helper riêng.
+//
+// escapeJsAttr(s): dùng khi chèn vào onclick="fn('...')" — dữ liệu nằm ở 2 lớp lồng nhau (chuỗi JS
+// trong dấu nháy đơn, bên trong thuộc tính HTML trong dấu nháy kép) — PHẢI escape ĐỦ CẢ 2 lớp: escape
+// ký tự đặc biệt của chuỗi JS (\, ') trước, rồi encode " thành HTML entity (một escapeHtml() phía sau
+// ĐƠN THUẦN không đủ, vì entity chỉ được HTML parser giải mã đúng 1 lần ở tầng ATTRIBUTE, không tự động
+// bảo vệ được dấu nháy đơn phá vỡ literal chuỗi JS lồng bên trong).
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function escapeJsAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;');
+}
+
+// GLOBAL STATE
+// ════════════════════════════════════════════════════
+let currentTab = 'home'; // được applyUIState() ghi đè lại đúng giá trị đã lưu khi app khởi động
+let showPinyin = true;
+let showMeaning = true;
+let showHanViet = true;
+let questionCount = 10;
+
+// FIX (audit lặp từ/mất tiến độ): vẽ lại đúng THẺ ĐANG XEM của tab luyện tập hiện tại, KHÔNG gọi
+// API, KHÔNG nạp lại hàng đợi — khác với render() (dùng khi CHUYỂN TAB, hợp lý phải nạp lại).
+// Trước đây togglePinyin/toggleMeaning/toggleHanViet gọi thẳng render(), mà render() cho 4 tab
+// flash/quiz/type/listen lại dispatch sang bindFlash/bindQuiz/bindType/bindListen — các hàm này
+// LUÔN sqLoad() nạp lại hàng đợi mới từ /api/study/session mỗi lần gọi. Hệ quả: user đang học dở
+// (đã trả lời vài câu, có thẻ Again đã bị chèn lùi lại theo REPEAT_GAP), chỉ cần bấm "Ẩn Pinyin"
+// là toàn bộ hàng đợi bị THAY MỚI — mất tiến độ phiên, thẻ vừa trả lời đúng có thể xuất hiện lại
+// (đây nhiều khả năng là nguyên nhân chính gây cảm giác "lặp từ" khi đang học).
+function refreshCurrentCardDisplay() {
+  if (currentTab === 'flash' && fcQueue.totalPlanned > 0) { fcUpdate(); return; }
+  if (currentTab === 'quiz' && qzQueue.totalPlanned > 0) { qzRenderQ(); return; }
+  if (currentTab === 'type' && tyQueue.totalPlanned > 0) { tyRenderQ(); return; }
+  if (currentTab === 'listen' && lsQueue.totalPlanned > 0) { lsRenderQ(); return; }
+  // FIX (Vấn đề 7 — Review dùng chung rvQueue thay vì rvSession/rvTotalPlanned rời rạc):
+  if (currentTab === 'review' && rvQueue.items.length >= 0 && rvQueue.totalPlanned > 0) {
+    const el = document.getElementById('content');
+    if (el) { el.innerHTML = renderReview(); bindReview(); }
+    return;
+  }
+  render(); // các tab khác (home/today/stats/...) không giữ "hàng đợi" đang học dở, render() bình thường an toàn
+}
+function togglePinyin() {
+  showPinyin = !showPinyin;
+  document.getElementById('py-toggle-btn').textContent = showPinyin ? 'Ẩn Pinyin' : 'Hiện Pinyin';
+  progressState.ui.showPinyin = showPinyin;
+  cacheProgressLocally();
+  scheduleSync();
+  refreshCurrentCardDisplay();
+}
+function toggleMeaning() {
+  showMeaning = !showMeaning;
+  document.getElementById('vi-toggle-btn').textContent = showMeaning ? 'Ẩn nghĩa' : 'Hiện nghĩa';
+  progressState.ui.showMeaning = showMeaning;
+  cacheProgressLocally();
+  scheduleSync();
+  refreshCurrentCardDisplay();
+}
+function toggleHanViet() {
+  showHanViet = !showHanViet;
+  document.getElementById('hv-toggle-btn').textContent = showHanViet ? 'Ẩn Hán Việt' : 'Hiện Hán Việt';
+  progressState.ui.showHanViet = showHanViet;
+  cacheProgressLocally();
+  scheduleSync();
+  refreshCurrentCardDisplay();
+}
+
+function goTab(tab) {
+  currentTab = tab;
+  // Tab 'review' là phiên học FSRS đang chạy dở — không lưu làm lastTab (mở lại app không nên
+  // tự nhảy vào giữa 1 session cũ), khi tải lại trang sẽ quay về 'today'.
+  progressState.ui.lastTab = (tab === 'review') ? 'today' : tab;
+  cacheProgressLocally();
+  scheduleSync();
+  navHighlight(tab); // V116: đánh dấu mục thanh dưới theo NHÓM của tab + vẽ chip phụ (js/nav.js)
+  // Hiệu ứng fade/slide nhẹ CHỈ khi thực sự chuyển tab — không áp dụng khi chỉ đổi lựa chọn
+  // trong cùng 1 tab (tránh bị "nháy" mỗi lần bấm chọn bài/Quyển).
+  const el = document.getElementById('content');
+  el.style.animation = 'none';
+  void el.offsetWidth;
+  el.style.animation = '';
+  render();
+}
+
+// Sinh màu theo công thức (golden-angle hue) để hỗ trợ mọi số bài học (1..30+) một cách nhất quán
+function lessonHue(l) { return Math.round((l * 137.508) % 360); }
+function lessonColor(l) { return l===0 ? 'var(--active)' : `hsl(${lessonHue(l)},58%,42%)`; }
+function lessonBg(l)    { return l===0 ? 'var(--l9b)'    : `hsl(${lessonHue(l)},65%,95%)`; }
+function lessonTagBg(l) { return `hsl(${lessonHue(l)},58%,86%)`; }
+function tagClass(l) { return 'tag-l'+l; } // giữ để tương thích, không còn dùng để tô màu
+function lessonTagStyle(l) { return `background:${lessonTagBg(l)};color:${lessonColor(l)};`; }
+
+// V103 (yêu cầu người dùng — hiện "từ này thuộc những bài nào" lúc đang học/ôn, vd 1 từ vừa ở Bài 5
+// vừa ở Bài 12): dùng chung cho js/review.js (rv-tag) + js/flashcard.js (fc-lesson-tag) — cả 2 đều
+// lấy từ CÙNG /api/study/session nên field `w.lessons` (mảng, xem formatFsrsCard/formatVocabWord ở
+// lib/fsrs/studyScope.js) luôn có sẵn; `w.l` là fallback cho dữ liệu cũ/nơi chưa gửi `lessons`.
+function lessonsLabel(w) {
+  const list = (Array.isArray(w.lessons) && w.lessons.length) ? w.lessons : [w.l];
+  const names = list.map(lessonName);
+  if (names.length <= 6) return names.join(', ');
+  return `${names.slice(0, 6).join(', ')} +${names.length - 6} mục khác`;
+}
+// Tên hiển thị của 1 số bài: mục chỉ có đúng 1 bài (HSK 1, HSK 2, Chuyên ngành, Từ nối...) hiện TÊN mục;
+// Quyển nhiều bài (Quyển 1, 2, 3, 4) vẫn hiện "Bài N". Dùng khi đang học để thấy "HSK 1" thay vì "33".
+function lessonName(l) {
+  const b = BOOKS.find(x => l >= x.from && l <= x.to);
+  return (b && b.from === b.to && b.name) ? b.name : 'Bài ' + l;
+}
+
+// Quyển (book) — Quyển 1: bài 1-15, Quyển 2: bài 16-30
+let BOOKS = [
+  {id:1,  name:'Quyển 1',      from:1,   to:15,  group:'📗 Giáo trình cơ bản'},
+  {id:2,  name:'Quyển 2',      from:16,  to:30,  group:'📗 Giáo trình cơ bản'},
+  {id:12, name:'Quyển 3',      from:100, to:109, group:'📗 Giáo trình cơ bản'},
+  {id:13, name:'Quyển 4',      from:110, to:119, group:'📗 Giáo trình cơ bản'},
+  {id:3,  name:'Chuyên ngành', from:31, to:31, group:'🧩 Từ vựng mở rộng'},
+  {id:14, name:'Từ nối',       from:90, to:90, group:'🧩 Từ vựng mở rộng'},
+  {id:15, name:'Lượng từ',     from:91, to:91, group:'🧩 Từ vựng mở rộng'},
+  {id:16, name:'Động từ ly hợp', from:120, to:120, group:'🧩 Từ vựng mở rộng'},
+  {id:4,  name:'HSK 1',        from:33, to:33, group:'🎯 Luyện thi HSK'},
+  {id:5,  name:'HSK 2',        from:34, to:34, group:'🎯 Luyện thi HSK'},
+  {id:6,  name:'HSK 3',        from:35, to:35, group:'🎯 Luyện thi HSK'},
+  {id:7,  name:'HSK 4',        from:36, to:36, group:'🎯 Luyện thi HSK'},
+  {id:9,  name:'HSK 5',        from:37, to:37, group:'🎯 Luyện thi HSK'},
+  {id:10, name:'HSK 6',        from:38, to:38, group:'🎯 Luyện thi HSK'},
+  {id:11, name:'HSK 6+',       from:39, to:39, group:'🎯 Luyện thi HSK'},
+];
+// Tự động nhận diện các số bài có từ vựng trong database nhưng CHƯA thuộc Quyển/level nào ở trên
+// (vd admin import Excel với số bài mới, chưa từng khai báo) — tự thêm thành 1 mục chọn riêng,
+// không cần sửa code mỗi khi có dữ liệu mới.
+function mergeDiscoveredLessonsIntoBooks() {
+  const isCovered = (l) => BOOKS.some(b => l >= b.from && l <= b.to);
+  const discovered = Object.keys(vocabCounts)
+    .map(k => parseInt(k, 10))
+    .filter(l => Number.isFinite(l) && vocabCounts[l] > 0 && !isCovered(l))
+    .sort((a,b) => a-b);
+  for (const l of discovered) {
+    // id = 2000+bài — cố định theo số bài (không phải bộ đếm tăng dần) để giữ ổn định giữa các lần
+    // mở app, tránh trường hợp cùng 1 id trỏ sang bài khác nhau nếu thứ tự phát hiện thay đổi.
+    BOOKS.push({ id: 2000 + l, name: 'Bài ' + l, from: l, to: l, group: '🆕 Từ vựng mới (tự nhận diện)' });
+  }
+}
+function lessonsOfBook(bookId) {
+  const b = BOOKS.find(x=>x.id===bookId);
+  const arr = [];
+  for (let i=b.from;i<=b.to;i++) arr.push(i);
+  return arr;
+}
+function bookOfLesson(l) {
+  const b = BOOKS.find(x => l>=x.from && l<=x.to);
+  return b ? b.id : 1;
+}
+// Cho phép chọn NHIỀU Quyển/level cùng lúc qua 1 ô droplist (multi-select)
+let selectedBookIds = new Set([1]);
+let selectedLessons = new Set(); // các bài đang chọn riêng lẻ (chỉ có ý nghĩa khi lessonsAllMode = false)
+let lessonsAllMode = true; // true = học hết tất cả các bài trong (các) Quyển/level đang chọn
+
+// Đã đăng nhập hay chưa (không còn chế độ dùng thử: chưa đăng nhập thì chỉ thấy màn hình đăng nhập).
+function isLoggedIn() { return !!authToken && !!authUsername; }
+
+// Toàn bộ các bài học thuộc những Quyển/level đang được chọn (đã gộp, đã sắp xếp)
+function lessonsOfSelection() {
+  const set = new Set();
+  for (const id of selectedBookIds) for (const l of lessonsOfBook(id)) set.add(l);
+  return [...set].sort((a,b)=>a-b);
+}
+
+// Lưu lại lựa chọn Quyển/level + bài hiện tại vào progressState.ui (đồng bộ lên server —
+// cacheProgressLocally tự lưu máy, scheduleSync chỉ đẩy lên server khi đã đăng nhập)
+function saveSelectionState() {
+  progressState.ui.selectedBookIds = [...selectedBookIds];
+  progressState.ui.selectedLessons = [...selectedLessons];
+  progressState.ui.lessonsAllMode = lessonsAllMode;
+  cacheProgressLocally();
+  scheduleSync();
+  // FIX (chọn bài học không lọc đúng): Quyển/bài đang chọn vừa đổi — mọi hàng đợi luyện tập đã nạp
+  // trước đó (kể cả bản đã lưu localStorage) được nạp theo lựa chọn CŨ nên không còn hợp lệ. Huỷ
+  // ngay để lần vào tab Review/Flashcard/Trắc nghiệm/Gõ chữ/Nghe-chọn kế tiếp bắt buộc nạp lại đúng
+  // theo lựa chọn MỚI (xem sqInvalidateQueuesForSelectionChange ở js/study-queue.js).
+  sqInvalidateQueuesForSelectionChange();
+  invalidateTodayDashboardCache(); // V98 fix — xem giải thích ở js/lesson.js
+}
+
+// Bấm 1 thẻ Quyển/level: bật/tắt trong danh sách đang chọn (giữ lại ít nhất 1 mục luôn được chọn)
+function toggleBook(id) {
+  if (selectedBookIds.has(id)) {
+    selectedBookIds.delete(id); // cho phép bỏ chọn hết, không bắt buộc giữ lại tối thiểu 1 mục
+  } else {
+    selectedBookIds.add(id);
+  }
+  selectedLessons.clear(); lessonsAllMode = true; // đổi Quyển/level thì reset lựa chọn bài cụ thể trước đó
+  saveSelectionState();
+  render();
+  ensureVocabLoaded(selectedBookIds).then(() => render()); // tải đúng phần từ vựng vừa chọn thêm (nếu chưa có)
+}
+
+// Bấm "Tất cả": học hết các bài trong (các) Quyển/level đang chọn
+function selectAllLessonsInSelection() { selectedLessons.clear(); lessonsAllMode = true; saveSelectionState(); render(); }
+// Bấm 1 thẻ bài cụ thể: bật/tắt bài đó (chọn được nhiều bài cùng lúc, có thể bỏ tích hết để không chọn bài nào)
+function toggleLessonChip(l) {
+  lessonsAllMode = false;
+  if (selectedLessons.has(l)) selectedLessons.delete(l);
+  else selectedLessons.add(l);
+  saveSelectionState();
+  render();
+}
+
+// Cache số từ theo từng Quyển/level — tránh phải lọc lại toàn bộ WORDS mỗi lần vẽ lại danh sách.
+// Với các bài chưa tải nội dung về, dùng số đếm nhẹ lấy từ server (vocabCounts) để vẫn hiện
+// đúng số từ mà không cần tải cả nội dung (toàn bộ từ vựng giờ đều nạp từ database, kể cả Quyển 1/2).
+let _bookCountCache = { len: -1, counts: {} };
+function bookWordCount(bookId) {
+  if (_bookCountCache.len !== WORDS.length) {
+    const counts = {};
+    for (const b of BOOKS) counts[b.id] = 0;
+    for (const w of WORDS) {
+      const b = BOOKS.find(x => w.l >= x.from && w.l <= x.to);
+      if (b) counts[b.id]++;
+    }
+    _bookCountCache = { len: WORDS.length, counts };
+  }
+  const b = BOOKS.find(x => x.id === bookId);
+  if (b && !loadedLessonNumbers.has(b.from)) {
+    let sum = 0;
+    for (let l = b.from; l <= b.to; l++) sum += vocabCounts[l] || 0;
+    return sum;
+  }
+  return _bookCountCache.counts[bookId] || 0;
+}
+
+// Thẻ chọn Quyển/level, nhóm theo từng loại (Giáo trình cơ bản / Từ vựng mở rộng / Luyện thi HSK...)
+// Có thể chạm nhiều thẻ để chọn cùng lúc.
+function levelSelectHtml() {
+  const groups = [];
+  for (const b of BOOKS) if (!groups.includes(b.group)) groups.push(b.group);
+  return groups.map(g => {
+    // Ẩn các bài không còn từ nào (0 từ) khỏi màn chọn — trừ khi đang được chọn sẵn,
+    // để tránh tình trạng "bài thừa" còn sót lại sau khi xoá/nhập lại dữ liệu.
+    const booksInGroup = BOOKS.filter(b => b.group === g)
+      .filter(b => bookWordCount(b.id) > 0 || selectedBookIds.has(b.id));
+    if (booksInGroup.length === 0) return '';
+    const cards = booksInGroup.map(b => {
+      const sel = selectedBookIds.has(b.id);
+      const count = bookWordCount(b.id);
+      return `<button class="book-card${sel?' sel':''}" onclick="toggleBook(${b.id})">
+        <span class="book-card-name">${b.name}</span>
+        <span class="book-card-count">${count} từ</span>
+      </button>`;
+    }).join('');
+    return `<div class="book-group">
+      <div class="book-group-label">${g}</div>
+      <div class="book-grid">${cards}</div>
+    </div>`;
+  }).join('');
+}
+
+// Chip chọn bài cụ thể — CHỈ áp dụng cho các Quyển có nhiều hơn 1 bài (Quyển 1, Quyển 2).
+// Chuyên ngành / HSK... mỗi mục chỉ có đúng 1 bài nên không cần (và không hiện) phần chọn thêm này.
+function lessonSelectHtml() {
+  const multiLessonIds = [...selectedBookIds].filter(id => {
+    const b = BOOKS.find(x => x.id === id);
+    return b && (b.to > b.from);
+  });
+  if (multiLessonIds.length === 0) return '';
+  const set = new Set();
+  for (const id of multiLessonIds) for (const l of lessonsOfBook(id)) set.add(l);
+  const lessons = [...set].sort((a,b)=>a-b);
+  const allBtn = `<button class="lbtn${lessonsAllMode?' sel':''}" style="${lessonsAllMode ? `border-color:var(--active);background:var(--active);color:#fff;` : `border-color:var(--active);background:${lessonBg(0)};color:var(--active);`}" onclick="selectAllLessonsInSelection()">Tất cả</button>`;
+  const chips = lessons.map(l => {
+    const sel = !lessonsAllMode && selectedLessons.has(l);
+    const style = sel
+      ? `border-color:${lessonColor(l)};background:${lessonColor(l)};color:#fff;`
+      : `border-color:${lessonColor(l)};background:${lessonBg(l)};color:${lessonColor(l)};`;
+    return `<button class="lbtn${sel?' sel':''}" style="${style}" onclick="toggleLessonChip(${l})">Bài ${l}</button>`;
+  }).join('');
+  return `<div style="font-size:.72rem;color:var(--muted);font-weight:700;margin:8px 0 4px;">Chọn bài cụ thể (có thể bỏ tích hết để không chọn bài nào)</div>
+    <div id="lesson-filter">${allBtn}${chips}</div>`;
+}
+
+// ════════════════════════════════════════════════════
+// AUDIT V82 (Phần 5 — KEYBOARD SHORTCUTS): tối ưu học bằng bàn phím trên desktop, không đụng tới
+// kiến trúc/luồng dữ liệu — mọi phím tắt chỉ GỌI LẠI đúng hàm mà nút bấm tương ứng đã gọi (fcFlip,
+// fcAnswer, rvChooseRating, .click() lên đúng nút option), không có đường đi dữ liệu riêng nào khác
+// nút bấm chuột, nên không có rủi ro mới về mất review/lệch FSRS.
+//   Space → lật thẻ (Flashcard)      1 → Again / Chưa nhớ      A → phát âm lại
+//   1-4   → chọn đáp án trắc nghiệm  2 → Hard / Đã nhớ
+//           (theo ĐÚNG thứ tự đang hiển thị, đã xáo trộn)  3 → Good      4 → Easy
+// Bỏ qua hoàn toàn khi: đang gõ vào input/textarea/select/contenteditable (không phá tab "Gõ chữ",
+// ô mật khẩu, admin...), có modifier (Ctrl/Alt/Cmd — nhường phím tắt trình duyệt/OS), hoặc đang có
+// 1 trong các modal toàn màn hình (đăng nhập/đổi mật khẩu/menu tài khoản/xác nhận nguy hiểm) mở.
+// ════════════════════════════════════════════════════
+function kbdIsTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+function kbdAnyModalOpen() {
+  return ['auth-gate', 'account-menu', 'danger-confirm-modal', 'pw-modal', 'stroke-overlay', 'display-panel', 'more-sheet', 'sw-panel', 'sw-pause'].some(id => { // V116: thêm cửa sổ nét viết + 2 bảng của menu mới
+    const el = document.getElementById(id);
+    return el && getComputedStyle(el).display !== 'none';
+  });
+}
+// Chọn lựa chọn trắc nghiệm thứ `index` (0-based) đang HIỂN THỊ trên màn hình theo đúng vị trí mắt
+// nhìn thấy — vì các lựa chọn đã bị xáo ngẫu nhiên phía JS, "phím 1" luôn là nút Ở VỊ TRÍ ĐẦU TIÊN
+// hiện tại, không gắn cố định với 1 đáp án/nghĩa nào. Bỏ qua nếu nút đã disabled (đã trả lời rồi).
+function kbdPickOption(selector, index) {
+  const btn = document.querySelectorAll(selector)[index];
+  if (btn && !btn.disabled) btn.click();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  if (kbdIsTypingTarget(e.target) || kbdAnyModalOpen()) return;
+  const key = e.key;
+  const isDigit1to4 = key === '1' || key === '2' || key === '3' || key === '4';
+
+  if (currentTab === 'flash') {
+    if (key === ' ' || key === 'Spacebar') { e.preventDefault(); fcFlip(); return; }
+    if (fcFlipped && (key === '1' || key === '2') && fcQueue.items.length) {
+      e.preventDefault(); fcAnswer(key === '2'); return; // 1=Chưa nhớ(false), 2=Đã nhớ(true)
+    }
+    if (key.toLowerCase() === 'a' && fcQueue.items[0]) { e.preventDefault(); speak(fcQueue.items[0].hz); }
+  } else if (currentTab === 'quiz') {
+    if (isDigit1to4) { e.preventDefault(); kbdPickOption('#qz-opts .quiz-opt', +key - 1); }
+  } else if (currentTab === 'listen') {
+    if (isDigit1to4) { e.preventDefault(); kbdPickOption('#ls-area .listen-opt', +key - 1); }
+    else if (key.toLowerCase() === 'a') { e.preventDefault(); const b = document.getElementById('ls-play'); if (b) b.click(); }
+  } else if (currentTab === 'review') {
+    if (typeof swIsPaused === 'function' && swIsPaused()) return; // V117: đang tạm dừng
+    if (rvPhase === 'question' && isDigit1to4) { e.preventDefault(); kbdPickOption('#rv-opts .quiz-opt', +key - 1); }
+    else if (rvPhase === 'answered' && (rvRatingPhase === 'pending' || rvRatingPhase === 'loading') && isDigit1to4) {
+      e.preventDefault(); rvChooseRating(RV_RATING_ORDER[+key - 1]);
+    } else if (key.toLowerCase() === 'a' && rvQueue.items[0]) { e.preventDefault(); speak(rvQueue.items[0].word.hz); }
+  }
+});
+
