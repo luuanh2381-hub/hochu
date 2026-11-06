@@ -501,9 +501,23 @@ async function runBrowserOptimizerMainThread(jobId, trainingPayload, assetUrls) 
     if (!binding || typeof binding.computeParameters !== 'function' || typeof binding.FSRSBindingItem !== 'function' || typeof binding.FSRSBindingReview !== 'function') {
       throw new Error('initOptimizer() không trả về đúng hình dạng binding mong đợi (thiếu computeParameters/FSRSBindingItem/FSRSBindingReview).');
     }
-    const bindingItems = trainingPayload.train.map((item) =>
-      new binding.FSRSBindingItem((item.reviews || []).map((r) => new binding.FSRSBindingReview(r.rating, r.deltaT)))
-    );
+    // V137 — package contract (dist/index.d.ts, FSRSBindingItem): "Each FSRSItem corresponds to a single
+    // review, but contains the previous reviews of the card as well." 1 item/thẻ (bản trước) khiến
+    // fsrs-rs nhận 0 mẫu train -> luôn "NotEnoughData". Sinh 1 item cho MỖI review, bắt đầu từ k = 2
+    // (item 1 review có deltaT = 0 làm fsrs-rs panic). Trùng lặp với lib/fsrs/optimizer.js có chủ ý:
+    // đường server và đường trình duyệt phải cho ra CÙNG bộ item, nếu không điểm số sẽ lệch nhau.
+    const bindingItems = [];
+    for (const item of trainingPayload.train) {
+      const reviews = item.reviews || [];
+      for (let k = 2; k <= reviews.length; k++) {
+        bindingItems.push(new binding.FSRSBindingItem(
+          reviews.slice(0, k).map((r) => new binding.FSRSBindingReview(r.rating, r.deltaT))
+        ));
+      }
+    }
+    if (!bindingItems.length) {
+      throw new Error('Dữ liệu train không có thẻ nào từ 2 review trở lên — chưa thể train (mỗi mẫu train cần ít nhất 1 khoảng cách deltaT > 0).');
+    }
     let lastProgressUiAt = 0;
     const result = await binding.computeParameters(bindingItems, {
       enableShortTerm: true,

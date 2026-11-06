@@ -702,7 +702,7 @@ console.log('\n[lib/fsrs/optimizer.js — trainWithOfficialOptimizer() (Phần 3
     await testAsync('trainWithOfficialOptimizer(): binding REJECT khi progress trả false (1 trong 2 khả năng hành vi thật có thể xảy ra) → optimizerAborted=true + classifyOptimizerError()=RETRYABLE', async () => {
       await withFakeBinding(makeFakeBinding('reject'), async () => {
         await assert.rejects(
-          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 1 }] }], { abortAfterMs: 10 }),
+          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 0 }, { rating: 3, deltaT: 1 }] }], { abortAfterMs: 10 }),
           (err) => {
             assert.strictEqual(err.optimizerAborted, true, 'phải gắn optimizerAborted=true');
             assert.strictEqual(optimizer.classifyOptimizerError(err), 'RETRYABLE');
@@ -715,7 +715,7 @@ console.log('\n[lib/fsrs/optimizer.js — trainWithOfficialOptimizer() (Phần 3
     await testAsync('trainWithOfficialOptimizer(): binding RESOLVE với hình dạng KHÔNG hợp lệ khi progress trả false (khả năng hành vi thật còn lại) → VẪN optimizerAborted=true + RETRYABLE, KHÔNG bị lẫn với lỗi "weights không hợp lệ" thật (NON_RETRYABLE)', async () => {
       await withFakeBinding(makeFakeBinding('resolve-invalid'), async () => {
         await assert.rejects(
-          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 1 }] }], { abortAfterMs: 10 }),
+          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 0 }, { rating: 3, deltaT: 1 }] }], { abortAfterMs: 10 }),
           (err) => {
             assert.strictEqual(err.optimizerAborted, true, 'phải gắn optimizerAborted=true dù binding RESOLVE thay vì reject');
             assert.strictEqual(optimizer.classifyOptimizerError(err), 'RETRYABLE');
@@ -731,12 +731,45 @@ console.log('\n[lib/fsrs/optimizer.js — trainWithOfficialOptimizer() (Phần 3
       async function computeParameters() { throw new Error('fake binding: lỗi thật không liên quan abort'); }
       await withFakeBinding({ computeParameters, FSRSBindingItem, FSRSBindingReview }, async () => {
         await assert.rejects(
-          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 1 }] }], { abortAfterMs: 60_000 }),
+          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 0 }, { rating: 3, deltaT: 1 }] }], { abortAfterMs: 60_000 }),
           (err) => {
             assert.notStrictEqual(err.optimizerAborted, true, 'lỗi không liên quan abort không được gắn optimizerAborted');
             return true;
           }
         );
+      });
+    });
+
+    // V137 — bug thật "compute_parameters failed: NotEnoughData": contract của FSRSBindingItem là "mỗi
+    // item ứng với MỘT review, kèm lịch sử trước đó" — gửi 1 item/thẻ làm fsrs-rs không có mẫu train nào.
+    await testAsync('trainWithOfficialOptimizer(): phải sinh 1 FSRSBindingItem cho MỖI review (tiền tố lịch sử), KHÔNG phải 1 item/thẻ — nếu không fsrs-rs trả NotEnoughData', async () => {
+      let received = null;
+      class FSRSBindingItem { constructor(reviews) { this.reviews = reviews; } }
+      class FSRSBindingReview { constructor(rating, deltaT) { this.rating = rating; this.deltaT = deltaT; } }
+      async function computeParameters(items) { received = items; return new Array(21).fill(0.1); }
+      await withFakeBinding({ computeParameters, FSRSBindingItem, FSRSBindingReview }, async () => {
+        // 2 thẻ: 3 và 2 review -> tổng 2 + 1 = 3 item (mỗi thẻ bỏ item 1-review vì deltaT=0)
+        await optimizer.trainWithOfficialOptimizer([
+          { reviews: [{ rating: 3, deltaT: 0 }, { rating: 3, deltaT: 2 }, { rating: 2, deltaT: 9 }] },
+          { reviews: [{ rating: 3, deltaT: 0 }, { rating: 4, deltaT: 1 }] },
+        ]);
+      });
+      assert.ok(received, 'computeParameters phải được gọi');
+      assert.strictEqual(received.length, 3, `kỳ vọng 3 item (2 + 1), nhận ${received.length}`);
+      assert.deepStrictEqual(received.map((i) => i.reviews.length), [2, 3, 2]);
+    });
+
+    await testAsync('trainWithOfficialOptimizer(): thẻ chỉ có 1 review bị bỏ qua (item 1 review có deltaT=0 làm fsrs-rs panic), không thì ném lỗi rõ ràng thay vì train rỗng', async () => {
+      let received = null;
+      class FSRSBindingItem { constructor(reviews) { this.reviews = reviews; } }
+      class FSRSBindingReview { constructor(rating, deltaT) { this.rating = rating; this.deltaT = deltaT; } }
+      async function computeParameters(items) { received = items; return new Array(21).fill(0.1); }
+      await withFakeBinding({ computeParameters, FSRSBindingItem, FSRSBindingReview }, async () => {
+        await assert.rejects(
+          () => optimizer.trainWithOfficialOptimizer([{ reviews: [{ rating: 3, deltaT: 0 }] }]),
+          /Không có mẫu train nào/
+        );
+        assert.strictEqual(received, null, 'thẻ 1 review không sinh item nào -> không được gọi computeParameters với mảng rỗng');
       });
     });
   }

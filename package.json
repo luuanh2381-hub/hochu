@@ -18,7 +18,7 @@
     "test:distractor": "node test/heavy-distractor.test.js",
     "test:integration": "node test/fsrs.concurrency.integration.js",
     "test:optimizer": "node test/fsrs-optimizer.test.js",
-    "test:optimizer:browser-assets": "node test/fsrs-optimizer.browser-asset-resolution.test.js",
+    "test:optimizer:browser-assets": "node test/fsrs-optimizer.browser-asset-resolution.test.js && node test/fsrs-optimizer.browser-dependency-graph.test.js",
     "test:optimizer:integration": "node test/fsrs-optimizer.integration.test.js",
     "test:optimizer:binding": "node test/fsrs-optimizer.binding.smoke.test.js",
     "test:optimizer:frontend": "node test/fsrs-optimizer-frontend.smoke.test.js",
@@ -76,7 +76,10 @@
     "compression": "^1.7.4",
     "ts-fsrs": "5.4.1",
     "@vercel/functions": "^3.0.0",
-    "@open-spaced-repetition/binding": "0.5.0"
+    "@open-spaced-repetition/binding": "0.5.0",
+    "@napi-rs/wasm-runtime": "1.2.7",
+    "@emnapi/core": "1.11.3",
+    "@emnapi/runtime": "1.11.3"
   },
   "optionalDependencies": {
     "@open-spaced-repetition/binding-wasm32-wasi": "0.5.0"

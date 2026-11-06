@@ -59,13 +59,24 @@ function buildFakeNodeModules(root) {
   fs.writeFileSync(path.join(scopeDir, 'binding', 'dynamic-wasi.cjs'), 'const fakeDep = require("fs"); module.exports = { initOptimizer: async () => ({}) };'); // file CJS "bẫy" — nếu bị chọn nhầm, đây chính là nguồn require() gây lỗi thật trong trình duyệt
 
   // NESTED bên trong node_modules/@open-spaced-repetition/binding/node_modules/@napi-rs/wasm-runtime —
-  // CỐ Ý không đặt ở node_modules gốc của tmpRoot (xem giải thích ở trên).
+  // mô phỏng trường hợp npm/pnpm KHÔNG hoist (có version khác ở nơi khác trong cây phụ thuộc). Cố ý đặt
+  // version KHÁC bản hoisted ở gốc bên dưới để kiểm tra 2 bản cùng tên gói không ghi đè root của nhau.
   const nestedScopeDir = path.join(scopeDir, 'binding', 'node_modules', '@napi-rs');
   fs.mkdirSync(path.join(nestedScopeDir, 'wasm-runtime'), { recursive: true });
   fs.writeFileSync(path.join(nestedScopeDir, 'wasm-runtime', 'package.json'), JSON.stringify({
     name: '@napi-rs/wasm-runtime', version: '0.2.0', main: './index.mjs',
   }));
   fs.writeFileSync(path.join(nestedScopeDir, 'wasm-runtime', 'index.mjs'), 'export function instantiate() { return {}; }\n');
+
+  // Bản HOISTED ở node_modules gốc — đúng trạng thái sau khi package.json khai trực tiếp
+  // @napi-rs/wasm-runtime/@emnapi/core/@emnapi/runtime (V137, xem package.json). Package WASM
+  // (binding-wasm32-wasi) import các gói này nên chúng PHẢI resolve được từ vị trí CỦA NÓ.
+  const rootScopeDir = path.join(root, 'node_modules', '@napi-rs');
+  fs.mkdirSync(path.join(rootScopeDir, 'wasm-runtime'), { recursive: true });
+  fs.writeFileSync(path.join(rootScopeDir, 'wasm-runtime', 'package.json'), JSON.stringify({
+    name: '@napi-rs/wasm-runtime', version: '1.2.7', main: './runtime.js',
+  }));
+  fs.writeFileSync(path.join(rootScopeDir, 'wasm-runtime', 'runtime.js'), 'export function WASI() {}\nexport function instantiateNapiModuleSync() {}\n');
 
   // Package WASM — tên file KHÔNG khớp ví dụ đã tra cứu (đúng khó khăn #2), không có "main"/"exports".
   // "goi-khong-ton-tai-v97" (V97): dependency CỐ TÌNH không có mặt trên đĩa — test checkTransitiveDepsOnDisk
@@ -105,13 +116,17 @@ function loadFunctionsFromRealSource() {
   // __dirname = tmpRoot — mô phỏng "api/index.js nằm ngay tại tmpRoot" để checkTransitiveDepsOnDisk's
   // bước kiểm tra "hoisted lên node_modules gốc của project" tìm đúng vào tmpRoot/node_modules (nơi
   // buildFakeNodeModules() đã dựng), không đụng vào node_modules thật của project.
-  const sandbox = { require, fs, path, console, module: { exports: {} }, __dirname: tmpRoot };
+  // crypto: pkgUrlKey() băm sha1 đường dẫn root để 2 bản của cùng 1 tên gói không ghi đè nhau.
+  const sandbox = { require, fs, path, crypto: require('crypto'), console, module: { exports: {} }, __dirname: tmpRoot };
   vm.createContext(sandbox);
-  vm.runInContext(snippet + '\nmodule.exports = { computeBrowserOptimizerAssetUrlsDetailed, buildImportMapForFile, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey, rewriteBareSpecifiersInSource, extractBareSpecifiers, checkTransitiveDepsOnDisk };', sandbox, { filename: 'api/index.js (trích đoạn)' });
+  vm.runInContext(snippet + '\nmodule.exports = { computeBrowserOptimizerAssetUrlsDetailed, buildImportMapForFile, resolveBareSpecifierUrl, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey, rewriteBareSpecifiersInSource, extractBareSpecifiers, checkTransitiveDepsOnDisk };', sandbox, { filename: 'api/index.js (trích đoạn)' });
   return sandbox.module.exports;
 }
 
 console.log('[test/fsrs-optimizer.browser-asset-resolution.test.js]');
+
+// V137 — URL dạng /api/fsrs-optimizer/browser/pkg-dyn/<urlKey>/<relPath>; urlKey = "<tên>.<hash root>".
+const urlKeyOf = (url) => url.split('/')[5];
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fsrs-browser-asset-test-'));
 try {
@@ -122,7 +137,7 @@ try {
   module.paths.unshift(path.join(tmpRoot, 'node_modules'));
   require('module').Module._initPaths(); // đảm bảo global resolution cache nhận path mới ngay
 
-  const { computeBrowserOptimizerAssetUrlsDetailed, buildImportMapForFile, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey, rewriteBareSpecifiersInSource, extractBareSpecifiers, checkTransitiveDepsOnDisk } = loadFunctionsFromRealSource();
+  const { computeBrowserOptimizerAssetUrlsDetailed, buildImportMapForFile, resolveBareSpecifierUrl, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey, rewriteBareSpecifiersInSource, extractBareSpecifiers, checkTransitiveDepsOnDisk } = loadFunctionsFromRealSource();
 
   test('computeBrowserOptimizerAssetUrlsDetailed(): vẫn resolve ĐÚNG dù package chính có "exports" map chặn "./package.json" (lỗi thật đã gặp ở production — audit lại lần 4)', () => {
     const result = computeBrowserOptimizerAssetUrlsDetailed();
@@ -141,24 +156,42 @@ try {
     const result = computeBrowserOptimizerAssetUrlsDetailed();
     assert.strictEqual(result.ok, true);
     assert.ok(result.importMap['@napi-rs/wasm-runtime'], `importMap phải có mục cho @napi-rs/wasm-runtime — nhận: ${JSON.stringify(result.importMap)}`);
-    assert.ok(result.importMap['@napi-rs/wasm-runtime'].startsWith('/api/fsrs-optimizer/browser/pkg-dyn/napi-rs__wasm-runtime/'));
+    // V137 — urlKey có thêm hậu tố hash của root (2 bản cùng tên gói không được ghi đè nhau).
+    assert.ok(/^\/api\/fsrs-optimizer\/browser\/pkg-dyn\/napi-rs__wasm-runtime\.[0-9a-f]{10}\/index\.mjs$/.test(result.importMap['@napi-rs/wasm-runtime']), `URL không đúng dạng pkg-dyn/<tên>.<hash root>/<file>: ${result.importMap['@napi-rs/wasm-runtime']}`);
   });
 
   test('buildImportMapForFile(): quét đúng bare specifier từ nội dung file thật, không cần biết tên trước (tổng quát, không hardcode "@napi-rs/wasm-runtime")', () => {
     const dynamicWasiPath = path.join(tmpRoot, 'node_modules', '@open-spaced-repetition', 'binding', 'dynamic-wasi.mjs');
-    const map = buildImportMapForFile(dynamicWasiPath, 2);
-    assert.deepStrictEqual(Object.keys(map), ['@napi-rs/wasm-runtime']);
+    const { importMap, failures } = buildImportMapForFile(dynamicWasiPath);
+    assert.deepStrictEqual(Object.keys(importMap), ['@napi-rs/wasm-runtime']);
+    assert.strictEqual(failures.length, 0, `không được có lỗi resolve: ${JSON.stringify(failures)}`);
   });
 
   test('cache _dynamicPkgRootByUrlKey PHẢI trỏ đúng vào thư mục NESTED (bug thứ 2, cùng gốc với bug trên): route serveDynamicPkgFile() — nơi trình duyệt THỰC SỰ tải file @napi-rs/wasm-runtime về — phải dùng LẠI đúng root đã xác định lúc build import map, KHÔNG được tự tính lại bằng require.resolve() không-context (nếu tính lại sẽ vẫn ra null/404 dù import map đã đúng, vì cùng 1 lý do gốc: package bị nested, không hoist)', () => {
-    computeBrowserOptimizerAssetUrlsDetailed(); // đảm bảo cache đã populate (an toàn gọi lại nhiều lần)
-    const cachedRoot = _dynamicPkgRootByUrlKey['napi-rs__wasm-runtime'];
+    const result = computeBrowserOptimizerAssetUrlsDetailed(); // đảm bảo cache đã populate (an toàn gọi lại nhiều lần)
+    const urlKey = urlKeyOf(result.importMap['@napi-rs/wasm-runtime']);
+    const cachedRoot = _dynamicPkgRootByUrlKey[urlKey];
     const expectedNestedRoot = path.join(tmpRoot, 'node_modules', '@open-spaced-repetition', 'binding', 'node_modules', '@napi-rs', 'wasm-runtime');
     assert.strictEqual(cachedRoot, expectedNestedRoot, `phải dùng đúng root NESTED đã cache, nhận: ${cachedRoot}`);
   });
 
+  test('HAI BẢN cùng tên gói ở 2 vị trí khác nhau -> 2 urlKey KHÁC nhau, mỗi bản serve từ đúng root của nó (không ghi đè nhau)', () => {
+    const result = computeBrowserOptimizerAssetUrlsDetailed();
+    const bindingNested = path.join(tmpRoot, 'node_modules', '@open-spaced-repetition', 'binding', 'dynamic-wasi.mjs');
+    const wasmWorker = path.join(tmpRoot, 'node_modules', '@open-spaced-repetition', 'binding-wasm32-wasi', 'browser-worker-thing.mjs');
+    const keyFromBinding = urlKeyOf(resolveBareSpecifierUrl('@napi-rs/wasm-runtime', bindingNested).url);
+    const keyFromWasm = urlKeyOf(resolveBareSpecifierUrl('@napi-rs/wasm-runtime', wasmWorker).url);
+    assert.notStrictEqual(keyFromBinding, keyFromWasm, 'hai bản khác root phải có urlKey khác nhau');
+    const nestedRoot = path.join(tmpRoot, 'node_modules', '@open-spaced-repetition', 'binding', 'node_modules', '@napi-rs', 'wasm-runtime');
+    const hoistedRoot = path.join(tmpRoot, 'node_modules', '@napi-rs', 'wasm-runtime');
+    assert.strictEqual(_dynamicPkgRootByUrlKey[keyFromBinding], nestedRoot);
+    assert.strictEqual(_dynamicPkgRootByUrlKey[keyFromWasm], hoistedRoot);
+    assert.strictEqual(result.importMap['@napi-rs/wasm-runtime'], `/api/fsrs-optimizer/browser/pkg-dyn/${keyFromBinding}/index.mjs`);
+  });
+
   test('serveDynamicPkgFile(): PHẢI serve được file thật (không rơi vào nhánh lỗi 404 "Không rõ package") cho đúng urlKey của @napi-rs/wasm-runtime', () => {
-    computeBrowserOptimizerAssetUrlsDetailed();
+    const result = computeBrowserOptimizerAssetUrlsDetailed();
+    const urlKey = urlKeyOf(result.importMap['@napi-rs/wasm-runtime']);
     const res = {
       _json: null, _status: null, _body: null,
       status(code) { this._status = code; return this; },
@@ -167,7 +200,7 @@ try {
       setHeader() {},
       write() { return true; }, end() {}, on() {}, once() {}, emit() {}, // no-op đủ để .pipe() (nhánh file khác .mjs) không throw
     };
-    serveDynamicPkgFile({ params: { urlKey: 'napi-rs__wasm-runtime', 0: 'index.mjs' } }, res);
+    serveDynamicPkgFile({ params: { urlKey, 0: 'index.mjs' } }, res);
     assert.strictEqual(res._json, null, `không được rơi vào nhánh lỗi — nhận lỗi: ${JSON.stringify(res._json)}`);
     assert.notStrictEqual(res._status, 404);
     assert.ok(res._body && res._body.includes('export function instantiate'), 'phải trả về đúng nội dung file thật');
@@ -202,18 +235,18 @@ try {
     // strictEqual/deepStrictEqual được với literal [] của file test (khác prototype/realm) dù rỗng y
     // hệt — so sánh qua .length (primitive number, không có vấn đề cross-realm) thay vì so mảng trực tiếp.
     assert.strictEqual(extractBareSpecifiers(out).length, 0, `sau rewrite KHÔNG được còn bare specifier nào: ${out}`);
-    assert.ok(out.includes("from '/api/fsrs-optimizer/browser/pkg-dyn/napi-rs__wasm-runtime/index.mjs'"), `phải chứa đúng URL tuyệt đối: ${out}`);
+    assert.ok(/from '\/api\/fsrs-optimizer\/browser\/pkg-dyn\/napi-rs__wasm-runtime\.[0-9a-f]{10}\/index\.mjs'/.test(out), `phải chứa đúng URL tuyệt đối: ${out}`);
     assert.ok(out.includes('export async function initOptimizer'), 'phần code KHÁC ngoài specifier phải giữ nguyên y hệt');
   });
 
   test('rewrite dynamic import("pkg") -> thay đúng specifier bên trong, giữ nguyên cú pháp import(...)', () => {
     const out = rewriteBareSpecifiersInSource("const m = await import('@napi-rs/wasm-runtime');", dynamicWasiPathForRewriteTests);
-    assert.ok(out.includes("import('/api/fsrs-optimizer/browser/pkg-dyn/napi-rs__wasm-runtime/index.mjs')"), out);
+    assert.ok(/import\('\/api\/fsrs-optimizer\/browser\/pkg-dyn\/napi-rs__wasm-runtime\.[0-9a-f]{10}\/index\.mjs'\)/.test(out), out);
   });
 
   test('rewrite side-effect-only import \'pkg\' (không "from") -> thay đúng', () => {
     const out = rewriteBareSpecifiersInSource("import '@napi-rs/wasm-runtime';\nconsole.log(1);", dynamicWasiPathForRewriteTests);
-    assert.ok(out.includes("import '/api/fsrs-optimizer/browser/pkg-dyn/napi-rs__wasm-runtime/index.mjs'"), out);
+    assert.ok(/import '\/api\/fsrs-optimizer\/browser\/pkg-dyn\/napi-rs__wasm-runtime\.[0-9a-f]{10}\/index\.mjs'/.test(out), out);
   });
 
   test('specifier KHÔNG resolve được (package không tồn tại) -> GIỮ NGUYÊN, không throw, không phá nội dung khác', () => {
@@ -243,7 +276,7 @@ try {
     assert.strictEqual(res._json, null, `không được lỗi: ${JSON.stringify(res._json)}`);
     assert.ok(res._body, 'phải trả về nội dung file');
     assert.strictEqual(extractBareSpecifiers(res._body).length, 0, `nội dung file WORKER trả về cho trình duyệt KHÔNG được còn bare specifier nào (đây chính là file mà import map không áp dụng được): ${res._body}`);
-    assert.ok(res._body.includes('/api/fsrs-optimizer/browser/pkg-dyn/napi-rs__wasm-runtime/'), res._body);
+    assert.ok(/\/api\/fsrs-optimizer\/browser\/pkg-dyn\/napi-rs__wasm-runtime\.[0-9a-f]{10}\//.test(res._body), res._body);
   });
   console.log('\n[V97 — checkTransitiveDepsOnDisk(): tự chẩn đoán VẬT LÝ, phát hiện đúng package thiếu trên đĩa server]');
 
