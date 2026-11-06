@@ -22,6 +22,32 @@ const Module = require('module');
 const ROOT = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
+// Bản "gốc" của api/index.js để so route (test chống hồi quy bên dưới).
+// Trước đây đọc cứng '/tmp/orig/api/index.js' — nếu máy khác không có file đó thì test FAIL
+// giả và mất thời gian chẩn đoán. Giờ lấy từ git (commit gốc của repo), và chỉ dùng file
+// tạm /tmp khi biến môi trường HOCHU_ORIG_API trỏ tới (đường dự phòng cho máy không có git).
+const BASELINE_API_COMMIT = (() => {
+  const r = require('child_process').spawnSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
+  return r.status === 0 ? (r.stdout || '').trim().split('\n').filter(Boolean)[0] : null;
+})();
+let baselineApiCache = null;
+function readBaselineApi() {
+  if (baselineApiCache) return baselineApiCache;
+  const override = process.env.HOCHU_ORIG_API;
+  if (override && fs.existsSync(override)) {
+    baselineApiCache = fs.readFileSync(override, 'utf8');
+    return baselineApiCache;
+  }
+  if (BASELINE_API_COMMIT) {
+    const r = require('child_process').spawnSync('git', ['show', `${BASELINE_API_COMMIT}:api/index.js`], { cwd: ROOT, encoding: 'utf8' });
+    if (r.status === 0 && r.stdout) {
+      baselineApiCache = r.stdout;
+      return baselineApiCache;
+    }
+  }
+  assert.fail('Không lấy được bản gốc api/index.js: cần git (hoặc đặt HOCHU_ORIG_API=<đường dẫn>)');
+}
+
 let passed = 0, failed = 0;
 const pending = [];
 function test(name, fn) { pending.push({ name, fn }); }
@@ -387,7 +413,7 @@ test('Reset/xoá tài khoản dọn luôn hồ sơ kỹ năng trong cùng transa
 // ── 7. Không hồi quy ────────────────────────────────────────────────────────────────────────────
 console.log('\n[7] Không hồi quy');
 test('Mọi route API của bản gốc vẫn còn [case 16]', () => {
-  const orig = fs.readFileSync('/tmp/orig/api/index.js', 'utf8');
+  const orig = readBaselineApi();
   const routeSet = (s) => new Set([...s.matchAll(/app\.(get|post|put|delete)\('([^']+)'/g)].map(m => m[1] + ' ' + m[2]));
   const before = routeSet(orig), after = routeSet(api);
   for (const r of before) assert.ok(after.has(r), 'mất route: ' + r);

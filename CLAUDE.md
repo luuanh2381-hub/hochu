@@ -43,6 +43,7 @@ trong `index.html`; backend là 1 Express app chạy serverless trên Vercel + P
 | `test/*.js` | 51 file, `node:assert` thuần, không cần framework | 13.5k |
 | `migrations/*.sql` | Schema tiến hoá theo version (V69 → V129) | 13 file |
 | `docs/audit/*.md` | 43 báo cáo audit theo version — **tra cứu khi cần, KHÔNG đọc hết** | 432KB |
+| `docs/audit/INDEX.md` | Mục lục 1 dòng/báo cáo — **tìm ở đây trước khi mở file** | ngắn |
 | `docs/HANDOFF.md` | Trạng thái hiện tại + việc còn tồn. **Đọc file này ở đầu phiên mới** | ngắn |
 
 ### Vùng trong `api/index.js` (dùng `offset`/`limit` thay vì đọc cả file)
@@ -80,16 +81,30 @@ Chúng theo mẫu: `const X = (function(){...})(); if (typeof module !== 'undefi
 
 ## LỆNH THƯỜNG DÙNG (chạy đúng phạm vi, không chạy hết mọi lúc)
 
+**Ưu tiên `npm run verify:<vùng>`** — 1 lượt gọi làm cả syntax + test, PASS chỉ in 1 dòng/file,
+FAIL in đầy đủ output:
+
 ```bash
-node --check <file>            # luôn chạy sau khi sửa
-npm test                       # fsrs.test.js (nhanh, 23 test)
-npm run test:adaptive          # question-engine + adaptive-session + review-render
-npm run test:skills            # lib/skills.js + nhãn kỹ năng
-npm run test:vNNN              # test theo version (vd test:v135)
-npm run test:v110              # chuỗi dài 19 suite — chỉ khi sửa diện rộng
+npm run verify:server   # api/index.js + lib/**       (~4 test)
+npm run verify:ui       # js/*.js                      (~6 test)
+npm run verify:core     # module thuần dùng chung      (~5 test)
+npm run verify:fsrs     # lib/fsrs/** + optimizer      (~4 test)
 ```
-Test cần `DATABASE_URL` (chỉ các file `*.integration.*` và `v114-fixes`, `heavy-distractor`).
-`test/skills.test.js` đọc fixture `/tmp/orig/api/index.js` (khôi phục bằng `git show HEAD:api/index.js`).
+Khi chỉ sửa 1 vùng → chỉ chạy vùng đó. Sửa module dùng chung (`core`) → chạy thêm `server` + `ui`.
+
+Lệnh lẻ khi cần:
+```bash
+node --check <file>            # check 1 file
+npm test                       # fsrs.test.js
+npm run test:vNNN              # test theo version (vd test:v135)
+npm run test:quiet -- test/a.test.js test/b.test.js   # nhiều file, chỉ in khi lỗi
+npm run token:report [--all]   # số token thật từ log phiên
+```
+Test cần `DATABASE_URL` (chỉ các file `*.integration.*` và `v114-fixes`, `heavy-distractor`) —
+**không** đưa chúng vào lệnh verify.
+`test/skills.test.js` lấy bản gốc `api/index.js` từ `git` (commit gốc); nếu môi trường không có git,
+đặt `HOCHU_ORIG_API=<đường dẫn file>`.
+
 
 ---
 
@@ -103,3 +118,5 @@ Test cần `DATABASE_URL` (chỉ các file `*.integration.*` và `v114-fixes`, `
 6. **Không chạy test ngoài phạm vi** đã sửa (trừ khi sửa module dùng chung ở trên).
 7. **Chỉ đọc `.env` nếu được yêu cầu** — không bao giờ in ra, không commit.
 8. Khi bắt đầu phiên mới: đọc `docs/HANDOFF.md` (~60 dòng) thay vì dò lại toàn repo.
+9. **Báo cáo token**: chỉ dùng `npm run token:report` — không tự viết lại script python rời.
+   Nếu lệnh không truy cập được log thì nói rõ "không có dữ liệu", KHÔNG ước lượng thay số thật.

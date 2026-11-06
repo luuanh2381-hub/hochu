@@ -20,12 +20,22 @@ Kéo–thả mảnh chữ (chỉ dùng chạm) · sinh câu bằng AI lúc làm 
 ## Trạng thái test (đo trên máy này, 2026-11-06)
 | Lệnh | Kết quả |
 |---|---|
+| `npm run verify:core` | 5/5 file test qua |
+| `npm run verify:server` | 4/4 file test qua |
+| `npm run verify:ui` | 6/6 file test qua |
+| `npm run verify:fsrs` | 4/4 file test qua |
 | `npm test` | 23 pass |
-| `test:adaptive` | 15 pass |
-| `test:skills` | 50 pass (cần fixture `/tmp/orig/api/index.js`) |
+| `test:skills` | 50 pass (bản gốc lấy từ git, không cần `/tmp/orig`) |
 | `test:v132` / `v133` / `v134` / `v135` | 8 / 9 / 12 / 19 pass |
 | `test:xss` / `test:auth-security` | 21 / 7 pass |
+| `test:fsrs-optimizer:binding` | **FAIL sẵn có** — thiếu native `@open-spaced-repetition/binding` đúng kiến trúc trên máy này (liên quan deploy, không phải code app) |
 | `test:*integration*` | **cần `DATABASE_URL`** — không chạy được nếu thiếu |
+
+## Công cụ tiết kiệm token (thêm 2026-11-06)
+`npm run verify:<vùng>` (syntax + test, chỉ in khi lỗi) · `npm run test:quiet -- <files>` ·
+`npm run token:report [--all]` (số token thật từ `~/.claude/projects/*.jsonl`).
+Mục lục báo cáo audit: `docs/audit/INDEX.md`.
+
 
 ## Cấu trúc quyết định đã chốt (đừng tự đổi)
 - FSRS = `ts-fsrs`, không tự viết thuật toán. `lib/fsrs/reviewService.js` là nguồn sự thật duy nhất.
