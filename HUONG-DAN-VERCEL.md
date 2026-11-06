@@ -46,7 +46,10 @@ ngày), không thể tăng thêm nếu không nâng cấp lên Vercel Pro.
 
 Để tự động chạy **nhiều lần hơn mỗi ngày mà vẫn miễn phí**, project đã có
 sẵn 1 workflow GitHub Actions ở `.github/workflows/generate-daily.yml`,
-gọi thẳng vào cùng API đó mỗi 15 phút (điều chỉnh được). Cách bật:
+gọi thẳng vào cùng API đó mỗi 15 phút, trong khung 20h–22h UTC (3h–6h sáng
+giờ VN) để database Neon free không phải chạy 24/7. Mỗi lượt gọi 2 lần song
+song: `?task=examples` (chỉ sinh ví dụ theo từ) và không tham số (hán việt →
+chiết tự → ví dụ). Cách bật:
 
 1. Vào repo GitHub của project → **Settings → Secrets and variables →
    Actions**.
@@ -58,8 +61,15 @@ gọi thẳng vào cùng API đó mỗi 15 phút (điều chỉnh được). Cá
 
 Xong — từ giờ mỗi 15 phút GitHub sẽ tự gọi 1 lần để sinh thêm dữ liệu, cho
 tới khi phủ hết toàn bộ từ vựng thì các lượt gọi sau gần như không tốn gì
-(trả lời ngay vì không còn gì để sinh thêm). Muốn đổi tần suất, sửa dòng
-`cron:` trong file workflow (vd `*/30 * * * *` = 30 phút/lần).
+(trả lời ngay vì không còn gì để sinh thêm). Muốn đổi tần suất/khung giờ,
+sửa dòng `cron:` trong file workflow (`*/30 * * * *` = 30 phút/lần cả ngày).
+
+**Trigger dày hơn (tuỳ chọn, không cần code):** GitHub Actions hay bị trễ
+5–20 phút và repo private bị giới hạn 2000 phút/tháng. Muốn sát 1 phút/lần
+thì tạo 1 cron miễn phí ở cron-job.org (hoặc UptimeRobot), trỏ tới
+`https://ten-app.vercel.app/api/cron/generate-daily?task=examples`, thêm
+header `Authorization: Bearer <CRON_SECRET>`. Chạy song song với GitHub
+cũng không vượt quota Gemini vì hàng đợi quota nằm chung trong Postgres.
 
 ## Lưu ý
 

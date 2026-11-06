@@ -18,7 +18,7 @@ const AREAS = {
   server: {
     desc: 'api/index.js + lib/ (route, DB, kỹ năng, FSRS)',
     syntax: ['api/index.js', ...glob('lib/**/*.js')],
-    tests: ['test/auth-security.test.js', 'test/xss-escaping.smoke.test.js', 'test/skills.test.js', 'test/drill-notes.test.js'],
+    tests: ['test/auth-security.test.js', 'test/xss-escaping.smoke.test.js', 'test/skills.test.js', 'test/drill-notes.test.js', 'test/cron-task.test.js'],
   },
   ui: {
     desc: 'js/ + css/ + index.html (frontend)',

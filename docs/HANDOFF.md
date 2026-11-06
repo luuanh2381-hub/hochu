@@ -14,6 +14,11 @@ mỗi từ bù đủ 3 câu ví dụ (`MIN_EXAMPLES_PER_WORD = 3`). Chi tiết: 
 - Chưa đo chi phí AI thật khi `MIN_EXAMPLES_PER_WORD = 3` (nếu tốn, hạ về 2).
 - `Intl.Segmenter` với tiếng Trung trên Safari cũ chưa kiểm (đã có đường lùi tách từng chữ).
 
+## Tự động sinh dữ liệu AI (thêm 2026-11-06)
+`/api/cron/generate-daily?task=examples` chỉ chạy phần ví dụ theo từ (bỏ qua hán việt/chiết tự).
+`.github/workflows/generate-daily.yml` gọi song song `task=examples` + mặc định, mỗi 15 phút trong
+khung 20h–22h UTC. Cần secret `APP_URL` + `CRON_SECRET`. Trần thật là RPD của Gemini free.
+
 ## Cố ý CHƯA làm
 Kéo–thả mảnh chữ (chỉ dùng chạm) · sinh câu bằng AI lúc làm bài · tính sắp-xếp-câu vào kế hoạch năng lực V128.
 

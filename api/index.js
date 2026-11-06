@@ -3258,22 +3258,30 @@ app.get('/api/cron/generate-daily', async (req, res) => {
   }
   const overallStart = Date.now();
   const TOTAL_BUDGET_MS = 50000;
+  // ?task=examples: chỉ chạy ví dụ theo từ (bỏ qua hán việt/chiết tự) — dùng khi 2 việc kia còn tồn
+  // nhưng vẫn muốn ví dụ có tiến độ. Không truyền task thì giữ nguyên chuỗi ưu tiên cũ.
+  const task = String(req.query.task || 'all');
   try {
-    // Thứ tự ưu tiên: (1) NGHĨA HÁN VIỆT trước (rẻ, nhanh, nhiều người cần nhất), rồi tới (2) CHIẾT TỰ
-    // BỘ THỦ, cuối cùng mới (3) VÍ DỤ THEO TỪ — mỗi việc chạy cho tới khi xong hẳn (có thể mất nhiều
-    // lượt cron liên tiếp) rồi mới sang việc tiếp theo, không chạy xen kẽ nhiều việc cùng lúc.
-    const hanvietResult = await runHanVietGeneration(TOTAL_BUDGET_MS);
-    const hanvietStillPending = hanvietResult.totalPending - hanvietResult.done;
+    let hanvietResult = { batches: 0, done: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let hanziResult = { batches: 0, done: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let wordResult = { batches: 0, wordsDone: 0, wordsRetried: 0, errors: 0, totalPending: 0, errorSamples: [] };
-    let remaining = TOTAL_BUDGET_MS - (Date.now() - overallStart);
-    if (hanvietStillPending <= 0 && remaining > 5000) {
-      hanziResult = await runHanziPartsGeneration(remaining);
-      const hanziStillPending = hanziResult.totalPending - hanziResult.done;
-      remaining = TOTAL_BUDGET_MS - (Date.now() - overallStart);
-      // Chỉ đụng tới ví dụ theo từ khi chiết tự đã KHÔNG CÒN chữ nào cần xử lý
-      if (hanziStillPending <= 0 && remaining > 5000) {
-        wordResult = await runWordExampleGeneration(remaining);
+    if (task === 'examples') {
+      wordResult = await runWordExampleGeneration(TOTAL_BUDGET_MS);
+    } else {
+      // Thứ tự ưu tiên: (1) NGHĨA HÁN VIỆT trước (rẻ, nhanh, nhiều người cần nhất), rồi tới (2) CHIẾT TỰ
+      // BỘ THỦ, cuối cùng mới (3) VÍ DỤ THEO TỪ — mỗi việc chạy cho tới khi xong hẳn (có thể mất nhiều
+      // lượt cron liên tiếp) rồi mới sang việc tiếp theo, không chạy xen kẽ nhiều việc cùng lúc.
+      hanvietResult = await runHanVietGeneration(TOTAL_BUDGET_MS);
+      const hanvietStillPending = hanvietResult.totalPending - hanvietResult.done;
+      let remaining = TOTAL_BUDGET_MS - (Date.now() - overallStart);
+      if (hanvietStillPending <= 0 && remaining > 5000) {
+        hanziResult = await runHanziPartsGeneration(remaining);
+        const hanziStillPending = hanziResult.totalPending - hanziResult.done;
+        remaining = TOTAL_BUDGET_MS - (Date.now() - overallStart);
+        // Chỉ đụng tới ví dụ theo từ khi chiết tự đã KHÔNG CÒN chữ nào cần xử lý
+        if (hanziStillPending <= 0 && remaining > 5000) {
+          wordResult = await runWordExampleGeneration(remaining);
+        }
       }
     }
     const allErrSamples = [...(hanvietResult.errorSamples || []), ...(wordResult.errorSamples || []), ...(hanziResult.errorSamples || [])];
