@@ -415,6 +415,19 @@ app.post('/api/progress', async (req, res) => {
         // dailyNewLimit, vẫn là mức trần cho MỖI LƯỢT lấy phiên (V101 — theo đúng ý người dùng).
         unlimitedStudy: typeof src.unlimitedStudy === 'boolean' ? src.unlimitedStudy
           : (typeof existingUi.unlimitedStudy === 'boolean' ? existingUi.unlimitedStudy : false),
+        // V136: tỷ lệ dạng bài (Hán→Nghĩa, Nghĩa→Hán, Nghe, Pinyin, Điền từ). Chỉ nhận khoá đã biết,
+        // kẹp 0–2; khoá lạ bị bỏ để client không tự thêm dữ liệu tuỳ ý vào bản ghi.
+        questionMix: (() => {
+          const srcMix = (src.questionMix && typeof src.questionMix === 'object') ? src.questionMix : {};
+          const oldMix = (existingUi.questionMix && typeof existingUi.questionMix === 'object') ? existingUi.questionMix : {};
+          const out = {};
+          for (const k of ['hz2vi', 'vi2hz', 'listen2hz', 'listen2vi', 'hz2py', 'cloze']) {
+            const v = Number(srcMix[k]);
+            out[k] = Number.isFinite(v) ? Math.max(0, Math.min(2, v))
+              : (Number.isFinite(Number(oldMix[k])) ? Math.max(0, Math.min(2, Number(oldMix[k]))) : (k === 'cloze' ? 2 : 1));
+          }
+          return out;
+        })(),
       };
       u.progress.ui = safeUi;
     });

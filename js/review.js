@@ -155,6 +155,34 @@ function rvSetOrderPerSession(v) {
   scheduleSync();
   if (typeof render === 'function') render();
 }
+// V136 — tỷ lệ từng dạng bài (Cài đặt hằng ngày): 0 tắt, 0.5 ít, 1 vừa (mặc định), 2 nhiều. Đọc từ
+// progressState.ui.questionMix (đồng bộ theo tài khoản). Thiếu/sai → {} (= mọi dạng hệ số 1, như trước).
+function rvQuestionMix() {
+  const ui = (typeof progressState !== 'undefined' && progressState) ? progressState.ui : null;
+  return (ui && ui.questionMix && typeof ui.questionMix === 'object') ? ui.questionMix : null;
+}
+function rvSetQuestionMix(typeId, v) {
+  if (typeof progressState === 'undefined' || !progressState) return;
+  const n = Math.max(0, Math.min(2, Number(v)));
+  const mix = Object.assign({}, progressState.ui.questionMix);
+  mix[typeId] = Number.isFinite(n) ? n : 1;
+  progressState.ui.questionMix = mix;
+  cacheProgressLocally();
+  scheduleSync();
+  if (typeof render === 'function') render();
+}
+// V136 — khối "tỷ lệ dạng bài" trong Cài đặt hằng ngày (lesson.js chèn khi hàm này có mặt, giống
+// cách rvSetOrderPerSession được dùng; tách ở đây để giữ danh sách dạng + nhãn cạnh QE).
+function rvQuestionMixHtml() {
+  const mix = (progressState && progressState.ui && progressState.ui.questionMix) || {};
+  const label = (t) => (QE.TYPES[t] || {}).label || t;
+  return `<div style="font-weight:800;font-size:.9rem;margin:14px 0 2px">🎚 Tỷ lệ dạng bài trong “Bắt đầu học”</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:6px;line-height:1.4">Hệ số nhân vào điểm chọn dạng, không phải tỷ lệ cứng: dạng để “Tắt” vẫn có thể xuất hiện khi không dạng nào khác dựng được câu (vd từ chưa có câu ví dụ → không có “Điền từ vào câu”).</div>
+    ${QE.MCQ_ORDER.map(t => `<div class="study-settings-row"><span>${label(t)}</span>
+      <select onchange="rvSetQuestionMix('${t}', this.value)">
+        ${[[0, 'Tắt'], [0.5, 'Ít'], [1, 'Vừa'], [2, 'Nhiều']].map(([v, txt]) => `<option value="${v}" ${mix[t] === v ? 'selected' : ''}>${txt}</option>`).join('')}
+      </select></div>`).join('')}`;
+}
 // Nguồn kết quả của bài luyện bổ sung (lưu ở server để tách "ngay sau xem đáp án" khỏi "nhớ sau khoảng nghỉ").
 function rvPracticeSource(item) {
   if (!item) return 'practice';
@@ -170,7 +198,7 @@ function rvBuildQuestionFor(item) {
   const w = item.word, ctx = Object.assign(rvQCtx(), { confusions: item.confusions });
   // V127: learner (số liệu cấp người học) + lastExerciseType (dạng đã hỏi cho từ này ở lần trước) — chỉ làm bộ chọn cân nhắc thêm; thiếu thì y như V126.
   const base = { session: rvQSession, profile: item.skillProfile, allowTyped: rvTypedEnabled(), remaining: rvQueue.items.filter(rvIsOfficial).length,
-    learner: rvLearner, lastExerciseType: item.lastExerciseType };
+    learner: rvLearner, lastExerciseType: item.lastExerciseType, mix: rvQuestionMix() };
   if (item.type === 'extra' && item.probe === 'typed' && rvTypedEnabled()) {
     // V127: thăm dò NHỚ CHỦ ĐỘNG — chọn đúng chữ Hán trong 4 đáp án là bằng chứng NHẬN DIỆN, chưa chứng minh tự nhớ ra chữ. Hỏi tự gõ (nghĩa → chữ Hán)
     // dưới dạng LUYỆN BỔ SUNG: ghi vào skill_practice_log (/api/skills/practice), KHÔNG đụng lịch/trạng thái FSRS. Không dựng được → rơi về luồng extra thường.

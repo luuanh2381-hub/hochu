@@ -48,3 +48,4 @@ Chỉ đọc báo cáo khớp với lỗi đang sửa.
 | `AUDIT-REPORT-V133-A-HAY-B-NGHE-GHEP.md` | "A hay B?" + ghép cặp nghe ↔ chữ Hán |
 | `AUDIT-REPORT-V134-DUNG-SAI-VA-SUA-THONG-KE.md` | "Đúng hay sai?" + sửa lỗi thống kê câu 2 đáp án |
 | `AUDIT-REPORT-V135-SAP-XEP-CAU.md` | "Sắp xếp câu" + mỗi từ bù đủ 3 câu ví dụ |
+| `AUDIT-REPORT-V136-TY-LE-DANG-BAI.md` | Tỷ lệ từng dạng bài trong Cài đặt; cloze mặc định "Nhiều" |

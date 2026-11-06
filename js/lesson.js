@@ -95,6 +95,7 @@ function renderToday() {
       <span>🤖 Hệ thống tự chấm đánh giá (không hiện 4 nút mỗi thẻ)</span>
       <input type="checkbox" ${rvManualRating() ? '' : 'checked'} onchange="rvSetManualRating(!this.checked)">
     </div>
+    ${typeof rvQuestionMixHtml === 'function' ? rvQuestionMixHtml() : ''}
     <div style="font-size:.85rem;opacity:.7;margin-top:4px;">
       ${ui.unlimitedStudy
         ? 'Bật: không bị chặn lại vì "đã học đủ hôm nay" — học được nhiều lượt tuỳ ý trong ngày. Mỗi lượt vẫn lấy đúng theo 2 giới hạn ôn tập/từ mới ở trên.'

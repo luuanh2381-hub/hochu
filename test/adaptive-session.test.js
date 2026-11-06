@@ -64,7 +64,7 @@ function makeEnv(opts) {
   vm.runInContext(read('js/question-engine.js'), ctx);
   vm.runInContext(read('js/question-selector.js'), ctx);
   const consts = ['RV_AUTO_COMMIT_MS', 'RV_NEW_GAP', 'RV_DRILL_GAP', 'RV_DRILL_MAX_TRIES', 'RV_EXTRA_MAX', 'RV_PROBE_MAX', 'RV_PRACTICE_TYPES', 'RV_CORRECTION_GAP'].map(constLine).join('\n'); // V115: rvAdvanceQueue dùng RV_CORRECTION_GAP
-  const fns = ['rvIsPractice', 'rvIsOfficial', 'rvIsIntroExposure', 'rvQCtx', 'rvSkillTypes', 'rvTypedEnabled', 'rvPracticeSource', // V110: rvBuildQuestionFor/rvPickPractice gọi 2 hàm này
+  const fns = ['rvIsPractice', 'rvIsOfficial', 'rvIsIntroExposure', 'rvQCtx', 'rvSkillTypes', 'rvTypedEnabled', 'rvQuestionMix', 'rvPracticeSource', // V110: rvBuildQuestionFor/rvPickPractice gọi 2 hàm này
      'rvBuildQuestionFor', 'rvStageLabel', 'rvRecordAnswer', 'rvRestoreQSession', 'rvBaseAutoMs', // V117: rvPickPractice dùng rvBaseAutoMs
    
     'rvPrepareCurrentCard', 'rvIntroDone', 'rvAdvanceQueue', 'rvFetchWeakWords', 'rvFetchProbeWords', 'rvFetchSkillWords', 'rvPlanPriorities', 'rvAdaptExtras', 'rvLoadExamples', 'rvWordOf', 'rvAddExtras', 'rvInsertMatch', 'rvBuildStartInfo',

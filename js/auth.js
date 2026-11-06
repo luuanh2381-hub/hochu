@@ -8,6 +8,20 @@ let authUsername = localStorage.getItem('authUsername') || null;
 try { localStorage.removeItem('authGuest'); localStorage.removeItem('guestProgress'); } catch {}
 // "ui" lưu lại trạng thái đang thao tác dở (tab đang xem, Quyển/level + bài đang chọn) —
 // được đồng bộ lên server cùng tiến độ học, để mở lại app (kể cả trên máy khác) vẫn đúng chỗ cũ.
+// V136 — tỷ lệ xuất hiện từng DẠNG BÀI trong "Hôm nay học" (Cài đặt hằng ngày). 0 = Tắt, 0.5 = Ít,
+// 1 = Vừa, 2 = Nhiều. Chỉ là hệ số nhân vào điểm của bộ chọn (js/question-selector.js). "Điền từ vào câu"
+// mặc định Nhiều: người học phản ánh dạng này ra quá ít so với nhu cầu luyện dùng từ trong ngữ cảnh.
+const QUESTION_MIX_TYPES = ['hz2vi', 'vi2hz', 'listen2hz', 'listen2vi', 'hz2py', 'cloze'];
+const QUESTION_MIX_DEFAULT = { cloze: 2 };
+function normalizeQuestionMix(m) {
+  const src = (m && typeof m === 'object') ? m : {};
+  const out = {};
+  for (const k of QUESTION_MIX_TYPES) {
+    const v = Number(src[k]);
+    out[k] = Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : (QUESTION_MIX_DEFAULT[k] == null ? 1 : QUESTION_MIX_DEFAULT[k]);
+  }
+  return out;
+}
 function defaultProgress() {
   return { srs: {}, streak: 0, lastDate: null, ui: {
     lastTab: 'home', selectedBookIds: [1], selectedLessons: [], lessonsAllMode: true,
@@ -20,6 +34,8 @@ function defaultProgress() {
     unlimitedStudy: false,
     // V135: số câu "🧩 Sắp xếp câu" (luyện bổ sung, KHÔNG đổi lịch FSRS) chèn vào mỗi buổi "Hôm nay học". 0–5.
     orderSentencePerSession: 2,
+    // V136: tỷ lệ từng dạng bài (xem QUESTION_MIX_TYPES).
+    questionMix: normalizeQuestionMix(),
   } };
 }
 function normalizeProgress(p) {
@@ -47,6 +63,7 @@ function normalizeProgress(p) {
   // V135: giới hạn 0–5 câu mỗi buổi; giá trị lạ/thiếu → 2 (giá trị mặc định).
   if (!Number.isFinite(p.ui.orderSentencePerSession)) p.ui.orderSentencePerSession = 2;
   p.ui.orderSentencePerSession = Math.max(0, Math.min(5, Math.round(p.ui.orderSentencePerSession)));
+  p.ui.questionMix = normalizeQuestionMix(p.ui.questionMix);
   if (!Number.isFinite(p.ui.currentLesson)) p.ui.currentLesson = null;
   return p;
 }

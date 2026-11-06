@@ -262,6 +262,9 @@ const QS = (function () {
     const remaining = extra && Number.isFinite(extra.remaining) ? extra.remaining : 0;
     const longQueue = remaining > W.longQueue;
     let s = W.base[typeId] != null ? W.base[typeId] : 1;
+    // V136: tỷ lệ dạng bài do người học đặt (0 = tắt, 2 = gấp đôi…) nhân vào điểm đầu — chỉ ở đây,
+    // để mọi cộng/trừ thích ứng phía dưới vẫn như cũ. Không truyền `mix` → hệ số 1 (y hệt trước).
+    if (extra && extra.mix) { const w = Number(extra.mix[typeId]); if (Number.isFinite(w) && w >= 0) s *= w; }
     const p = profile && profile[skill];
     const tough = struggling(session);
     const T = QE.TYPES[typeId];
@@ -350,7 +353,7 @@ const QS = (function () {
     if (o.fsrsOnly) types = types.filter(t => QE.TYPES[t].exerciseFsrs);
     const scored = types.map((t, i) => ({
       typeId: t, order: i,
-      score: scoreType(t, QE.TYPES[t].skill, o.profile, o.session, word, { remaining: o.remaining, confused: !!(o.confusions && o.confusions.length), learner: o.learner, lastType: typeIdOfExercise(o.lastExerciseType) }) + rand() * 1e-6, // phá hoà ổn định
+      score: scoreType(t, QE.TYPES[t].skill, o.profile, o.session, word, { remaining: o.remaining, confused: !!(o.confusions && o.confusions.length), learner: o.learner, lastType: typeIdOfExercise(o.lastExerciseType), mix: o.mix }) + rand() * 1e-6, // phá hoà ổn định
     }));
     scored.sort((a, b) => (b.score - a.score) || (a.order - b.order));
     return scored;

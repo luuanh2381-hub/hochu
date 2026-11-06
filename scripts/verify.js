@@ -25,7 +25,7 @@ const AREAS = {
     syntax: [...glob('js/*.js')],
     tests: [
       'test/v110-ui.smoke.test.js', 'test/v132-tap-only.test.js', 'test/v133-duel-listen.test.js',
-      'test/v134-binary-tf.test.js', 'test/v135-sentence-order.test.js', 'test/v116-menu.test.js',
+      'test/v134-binary-tf.test.js', 'test/v135-sentence-order.test.js', 'test/v136-question-mix.test.js', 'test/v116-menu.test.js',
     ],
   },
   core: {

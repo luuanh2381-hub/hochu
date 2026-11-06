@@ -5,8 +5,10 @@ Cập nhật lần cuối: 2026-11-06 · Commit: xem `git log -1`
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
 
 ## Version hiện tại
-Phiên bản mới nhất đã ship: **V135** — dạng "🧩 Sắp xếp câu" (`orderSentence`, practiceOnly) +
-mỗi từ bù đủ 3 câu ví dụ (`MIN_EXAMPLES_PER_WORD = 3`). Chi tiết: `docs/audit/AUDIT-REPORT-V135-SAP-XEP-CAU.md`.
+Phiên bản mới nhất đã ship: **V136** — tỷ lệ từng dạng bài trong "Cài đặt hằng ngày"
+(`questionMix`, hệ số 0/0.5/1/2, mặc định `cloze: 2` = điền từ vào câu ra nhiều hơn).
+Trước đó: V135 "🧩 Sắp xếp câu" + mỗi từ bù đủ 3 câu ví dụ (`MIN_EXAMPLES_PER_WORD = 3`).
+Chi tiết: `docs/audit/AUDIT-REPORT-V136-TY-LE-DANG-BAI.md`, V135: `AUDIT-REPORT-V135-SAP-XEP-CAU.md`.
 
 ## Việc còn tồn (từ báo cáo V135)
 - Chưa thử trên trình duyệt/điện thoại thật (chạm mảnh, bố cục hẹp, giọng đọc sau khi trả lời).
