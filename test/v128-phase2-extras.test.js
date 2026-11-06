@@ -284,7 +284,7 @@ test('Không đổi máy chủ/FSRS: câu luyện thêm vẫn là loại "extra"
   const add = body('rvAddExtras') + body('rvFetchSkillWords') + body('rvPlanPriorities');
   for (const bad of ['submitFsrsReviewAwaited', '/api/fsrs', '/api/study/', 'recordPractice', "type: 'review'", "type: 'new'"]) assert.ok(!add.includes(bad), bad);
   assert.ok(/practice-words/.test(add) && !/method:\s*'POST'/.test(add));
-  assert.ok(src.includes("const RV_PRACTICE_TYPES = ['drill', 'extra', 'check', 'redo'];"));
+  assert.ok(src.includes("const RV_PRACTICE_TYPES = ['drill', 'extra', 'check', 'redo', 'order'];")); // V135: + 'order' (sắp xếp câu, vẫn là luyện bổ sung)
 });
 test('rvIsOfficial: câu luyện thêm theo kế hoạch KHÔNG phải thẻ chính thức (không vào ngân sách/lịch ôn)', async () => {
   const r = await runExtras(20, LISTEN_LAG); R(r.ctx, '1');

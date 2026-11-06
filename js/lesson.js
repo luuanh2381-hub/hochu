@@ -290,11 +290,14 @@ function renderTodayPanel(data) {
       ${mode('👁', 'Thanh điệu bằng mắt<br><small>nhìn chữ → chọn thanh đúng</small>', "skStartPractice('tonevis')", true, '')}
       ${mode('⚔️', 'A hay B?<br><small>các cặp bạn hay nhầm</small>', "skStartPractice('duel')", true, '')}
       ${mode('✅', 'Đúng hay sai?<br><small>chạm Đúng / Sai nhanh</small>', "skStartPractice('tf')", true, '')}
+      ${mode('🧩', 'Sắp xếp câu<br><small>chạm các mảnh theo đúng thứ tự</small>', "skStartPractice('ordersentence')", true, '')}
     </div>
     <div style="font-size:.7rem;color:var(--muted);margin-top:6px;line-height:1.5">Chế độ 1–2 vẫn là ôn chính thức theo FSRS (có đổi lịch ôn). Các chế độ còn lại là luyện bổ sung: chỉ ghi hồ sơ kỹ năng, <b>không đổi lịch FSRS</b>.
     <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${rvTypedEnabled() ? 'checked' : ''} onchange="rvSetTypedEnabled(this.checked)"> Cho phép câu tự gõ đáp án trong “Bắt đầu học”</label>
     ${typeof rvmEnabled === 'function' ? `<label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${rvmEnabled() ? 'checked' : ''} onchange="rvmSetEnabled(this.checked)"> Câu luyện thêm gồm 3 phần (Pinyin · Nghĩa · Hán Việt), đúng 2/3 mới tính là đúng</label>` : ''}
-    ${typeof rvmOfficialEnabled === 'function' ? `<label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${rvmOfficialEnabled() ? 'checked' : ''} onchange="rvmSetOfficialEnabled(this.checked)"> 🧪 Thử nghiệm: thẻ ÔN NHANH (chính thức) cũng gồm 3 phần, đúng 2/3 mới tính là đúng. Ảnh hưởng lịch ôn; đúng 2/3 thì không chọn được Easy</label>` : ''}</div>
+    ${typeof rvmOfficialEnabled === 'function' ? `<label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${rvmOfficialEnabled() ? 'checked' : ''} onchange="rvmSetOfficialEnabled(this.checked)"> 🧪 Thử nghiệm: thẻ ÔN NHANH (chính thức) cũng gồm 3 phần, đúng 2/3 mới tính là đúng. Ảnh hưởng lịch ôn; đúng 2/3 thì không chọn được Easy</label>` : ''}
+    <label style="display:flex;gap:6px;align-items:center;margin-top:6px">🧩 Số câu “Sắp xếp câu” thêm vào mỗi buổi “Bắt đầu học”:
+      <select onchange="rvSetOrderPerSession(this.value)" style="font:inherit;padding:2px 6px;border-radius:8px;border:1px solid var(--border);background:var(--paper);color:var(--ink)">${[0,1,2,3,4,5].map(n => `<option value="${n}" ${rvOrderPerSession() === n ? 'selected' : ''}>${n === 0 ? 'Tắt' : n + ' câu'}</option>`).join('')}</select></label></div>
   </details>`;
 
   // V115 — BỐ CỤC GỌN: 1 nút lớn + 1 dòng mục tiêu + 3 con số chính. Mọi thứ còn lại gập vào \"Chi tiết\" (trước đây ~9 ô số + đoạn giải

@@ -57,7 +57,8 @@
     "test:v131b": "node test/v131b-multi3-official.test.js",
     "test:v132": "node test/v132-tap-only.test.js",
     "test:v133": "node test/v133-duel-listen.test.js",
-    "test:v134": "node test/v134-binary-tf.test.js"
+    "test:v134": "node test/v134-binary-tf.test.js",
+    "test:v135": "node test/v135-sentence-order.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

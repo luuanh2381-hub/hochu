@@ -13,7 +13,7 @@ const path = require('path');
 const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCounts, importVocab, clearVocab, deleteVocabLesson,
   getVocabWordsByLesson, updateVocabWord, deleteVocabWord,
   removeVocabWordFromLesson, setVocabWordLessons, findVocabWordByHz, // V93 (audit thống nhất từ vựng)
-  getAllVocabWords, updateVocabHanviet, getWordExampleCounts, insertWordExamples, getWordExamplesForLessons,
+  getAllVocabWords, updateVocabHanviet, getWordExampleCounts, insertWordExamples, getWordExamplesForLessons, getWordExamplesForWord,
   getAllHanziParts, getHanziPartsKeys, insertHanziParts, deleteHanziParts,
   insertActivityLog, getActivityLogs, reserveGeminiSlot, bumpGeminiRateLimit,
   getWeakFsrsCards, getFsrsCardsDebug,
@@ -28,6 +28,8 @@ const skillStore = require('../lib/skill-store');
 const wordNotes = require('../lib/word-notes');
 const aiExplain = require('../lib/ai-explain'); // V119: "🤖 Hỏi AI" ở câu sai
 const ttsHints = require('../lib/tts-hints'); // V129: "Sửa phát âm" cho chữ Hán đa âm
+const orderSentence = require('../js/order-sentence'); // V135: chấm "Sắp xếp câu" (dùng CHUNG js/ với trình duyệt)
+const PROGRAM_SENTENCES = require('../js/sentences-data'); // V135: câu mẫu giáo trình — nguồn câu ĐÚNG khi chấm sắp xếp câu
 const multiGrade = require('../lib/multi-grade'); // V131: chấm "câu 3 phần" (đúng 2/3) cho thẻ FSRS chính thức — chỉ khi client gửi `parts`
 const studyDays = require('../lib/study-days'); // V119.4: đếm số ngày đã học / số ngày từ khi tạo tài khoản
 const orphans = require('../lib/orphans');
@@ -996,13 +998,34 @@ app.post('/api/skills/practice', async (req, res) => {
   try {
     const word = await getWordForAnswerCheck(hz, l);
     if (!word) return res.json({ ok: false, error: 'Không tìm thấy từ vựng' });
-    const correctAnswer = correctAnswerForQuizType(word, ex.quizType);
+    // V135 — SẮP XẾP CÂU: đáp án là CẢ CÂU, không phải một trường của từ. Câu đúng KHÔNG lấy từ client:
+    // tìm trong câu mẫu giáo trình (js/sentences-data.js) và kho ví dụ theo từ (word_examples) một câu
+    // chứa đúng từ này mà sau chuẩn hoá trùng với chuỗi người học ghép. Không khớp câu nào → SAI.
+    let correctAnswer;
+    if (ex.quizType === 'order-sentence') {
+      const submitted = String(selectedAnswer);
+      const examples = await getWordExamplesForWord(hz).catch(() => []);
+      const candidates = orderSentence.fromSentences(word, PROGRAM_SENTENCES)
+        .concat(orderSentence.fromExamples(word, examples))
+        .map(c => c.zh);
+      // KHÔNG tự "đoán" câu: chỉ đúng khi có một câu THẬT của từ này trùng với chuỗi đã ghép.
+      correctAnswer = candidates.find(zh => orderSentence.isOrderCorrect(zh, submitted)) || '';
+    } else {
+      correctAnswer = correctAnswerForQuizType(word, ex.quizType);
+    }
     let graded, answerCorrect, wrongAnswer, claimIsTrue;
     if (ex.tf) {
       // V134 — Đúng/Sai: `selectedAnswer` là KHẲNG ĐỊNH được hiển thị; server tự biết nó đúng hay sai rồi chấm lời phán của người học.
       const bg = gradeBinaryVerdict(correctAnswer, selectedAnswer, verdict); // chỉ ghi "đáp án sai" khi người học CHẤP NHẬN khẳng định sai
       claimIsTrue = bg.claimIsTrue; answerCorrect = bg.answerCorrect; wrongAnswer = bg.wrongAnswer;
       graded = { answerCorrect, verdict: answerCorrect ? 'exact' : 'wrong' };
+    } else if (ex.quizType === 'order-sentence') {
+      // Đã so theo chuỗi chuẩn hoá ở trên: correctAnswer rỗng = không khớp câu thật nào → sai.
+      answerCorrect = !!correctAnswer;
+      graded = { answerCorrect, verdict: answerCorrect ? 'exact' : 'wrong' };
+      // KHÔNG lưu "đáp án sai" cho dạng này: chuỗi người học ghép là cả câu, không phải một đáp án của từ —
+      // đem làm đáp án nhiễu ở dạng trắc nghiệm sau này sẽ ra lựa chọn vô nghĩa. Nhật ký vẫn ghi đúng/sai.
+      wrongAnswer = null;
     } else {
       graded = gradeAnswer(correctAnswer, selectedAnswer, ex); // V110: chấm tự nhập chuẩn hoá khi bài khai báo `typed`
       answerCorrect = graded.answerCorrect;
@@ -2698,8 +2721,9 @@ function parseAiJson(text) {
 // mỗi câu được kiểm tra chắc chắn có chứa đúng chữ Hán của từ đó (nếu AI trả sai, câu đó bị loại,
 // từ vẫn coi là "chưa xong" và sẽ được thử lại ở lượt chạy sau).
 const TARGET_EXAMPLES_PER_WORD = 3;
-// FIX V122: chỉ cần ÍT NHẤT 1 ví dụ là coi từ đó đã hoàn thành (từ chưa có gì vẫn sinh tối đa 3 câu).
-const MIN_EXAMPLES_PER_WORD = 1;
+// V135: nâng từ 1 lên 3 — từ có 1-2 ví dụ vẫn được xếp vào hàng đợi để bù cho ĐỦ 3 câu như prompt yêu cầu.
+// (Trước đây ngưỡng "xong" là 1 nên phần lớn từ dừng ở 1 câu dù AI đã sinh tới 3.)
+const MIN_EXAMPLES_PER_WORD = 3;
 const WORD_BATCH_SIZE = 12;
 // Logic sinh CHIẾT TỰ BỘ THỦ cho từng chữ Hán đơn lẻ (khác word_examples — đây là phân tích cấu tạo
 // mặt chữ, không phải câu ví dụ). Chữ nào không tách được rõ ràng thì AI chỉ ghi 1 ghi chú ngắn.

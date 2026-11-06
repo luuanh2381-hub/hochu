@@ -18,6 +18,8 @@ function defaultProgress() {
     // unlimitedStudy: bật thì bỏ qua phần TRỪ theo số đã học hôm nay (không bị chặn "hết hạn mức,
     // quay lại ngày mai") — KHÔNG bỏ 2 giới hạn trên, mỗi lượt lấy phiên vẫn đúng số đã đặt (V101).
     unlimitedStudy: false,
+    // V135: số câu "🧩 Sắp xếp câu" (luyện bổ sung, KHÔNG đổi lịch FSRS) chèn vào mỗi buổi "Hôm nay học". 0–5.
+    orderSentencePerSession: 2,
   } };
 }
 function normalizeProgress(p) {
@@ -42,6 +44,9 @@ function normalizeProgress(p) {
   if (!Number.isFinite(p.ui.dailyNewLimit) || p.ui.dailyNewLimit < 0) p.ui.dailyNewLimit = 10;
   if (typeof p.ui.newOnlyAfterDue !== 'boolean') p.ui.newOnlyAfterDue = true;
   if (typeof p.ui.unlimitedStudy !== 'boolean') p.ui.unlimitedStudy = false;
+  // V135: giới hạn 0–5 câu mỗi buổi; giá trị lạ/thiếu → 2 (giá trị mặc định).
+  if (!Number.isFinite(p.ui.orderSentencePerSession)) p.ui.orderSentencePerSession = 2;
+  p.ui.orderSentencePerSession = Math.max(0, Math.min(5, Math.round(p.ui.orderSentencePerSession)));
   if (!Number.isFinite(p.ui.currentLesson)) p.ui.currentLesson = null;
   return p;
 }

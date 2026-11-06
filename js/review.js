@@ -74,7 +74,7 @@ const RV_DRILL_MAX_TRIES = 2;   // tối đa 2 lần hỏi 1 từ ở chế đ�
 const RV_EXTRA_MAX = 6;
 const RV_SKILL_NAME = { recognition: 'Nhận diện', recall: 'Nhớ chủ động', listening: 'Nghe', pinyin: 'Pinyin', context: 'Từ trong câu' }; // V128
 const RV_PROBE_MAX = 2;  // V127: tối đa 2 câu tự gõ "thăm dò nhớ chủ động" mỗi buổi — luyện bổ sung, KHÔNG phải thẻ FSRS
-const RV_PRACTICE_TYPES = ['drill', 'extra', 'check', 'redo'];
+const RV_PRACTICE_TYPES = ['drill', 'extra', 'check', 'redo', 'order']; // V135: 'order' = câu sắp xếp câu (luyện bổ sung)
 // ── V115 ────────────────────────────────────────────────────────────────────────────────────────────────────
 const RV_CORRECTION_GAP = 2;  // thẻ chính thức bị SAI → hỏi lại bằng DẠNG KHÁC sau ≥ 2 thẻ (luyện bổ sung: không đổi FSRS, không cộng điểm kỹ năng)
 const RV_LEECH_LAPSES = 4;    // khớp lib/memory-forecast.js (LEECH_LAPSES): đã quên ≥ 4 lần ...
@@ -140,6 +140,21 @@ function rvQCtx() {
 // V110 — cài đặt "Cho phép câu tự gõ đáp án" (mặc định BẬT; tắt nếu gõ trên điện thoại bất tiện). Lưu cục bộ theo thiết bị.
 function rvTypedEnabled() { try { return localStorage.getItem('rvAllowTyped') !== '0'; } catch { return true; } }
 function rvSetTypedEnabled(on) { try { localStorage.setItem('rvAllowTyped', on ? '1' : '0'); } catch {} if (typeof render === 'function') render(); }
+// V135 — số câu "🧩 Sắp xếp câu" thêm vào mỗi buổi "Hôm nay học" (0–5, mặc định 2). Đồng bộ theo tài khoản
+// (progressState.ui) để mở trên máy khác vẫn giữ nguyên lựa chọn. 0 = tắt hẳn dạng này trong buổi học.
+function rvOrderPerSession() {
+  const ui = (typeof progressState !== 'undefined' && progressState) ? progressState.ui : null;
+  const n = Number(ui && ui.orderSentencePerSession);
+  return Number.isFinite(n) ? Math.max(0, Math.min(5, Math.round(n))) : 2;
+}
+function rvSetOrderPerSession(v) {
+  const n = Math.max(0, Math.min(5, parseInt(v, 10) || 0));
+  if (typeof progressState === 'undefined' || !progressState) return;
+  progressState.ui.orderSentencePerSession = n;
+  cacheProgressLocally();
+  scheduleSync();
+  if (typeof render === 'function') render();
+}
 // Nguồn kết quả của bài luyện bổ sung (lưu ở server để tách "ngay sau xem đáp án" khỏi "nhớ sau khoảng nghỉ").
 function rvPracticeSource(item) {
   if (!item) return 'practice';
@@ -162,6 +177,10 @@ function rvBuildQuestionFor(item) {
     const q = QS.choose(w, ctx, Object.assign({}, base, { allowPracticeOnly: true, only: ['typeVi2hz'], forced: true, exclude: item.failedTypes || [] }));
     if (q) { q.why = 'Bạn chọn đúng chữ Hán khá tốt ở dạng chọn đáp án, nhưng chưa đủ dữ liệu về việc tự nhớ ra chữ — câu tự gõ này để đo thêm (luyện bổ sung, không đổi lịch ôn).'; return q; }
   }
+  if (item.type === 'order') { // V135: câu sắp xếp câu — chỉ dựng dạng này, không đổi sang dạng khác
+    const q = QS.choose(w, ctx, Object.assign({}, base, { allowPracticeOnly: true, only: QE.ORDER_ORDER, forced: true }));
+    return q || null;
+  }
   if (item.type === 'check') return QS.choose(w, ctx, Object.assign({}, base, { only: ['hz2vi'] }));
   if (item.type === 'drill') return QS.choose(w, ctx, Object.assign({}, base, { only: ['vi2hz'] }));
   if (item.type === 'extra' || item.type === 'redo') {
@@ -182,6 +201,7 @@ function rvStageLabel(item) {
   if (!item) return '';
   if (item.type === 'review') return '🔁 Ôn nhanh';
   if (item.type === 'new' || item.type === 'check') return '🆕 Học từ mới';
+  if (item.type === 'order') return '🧩 Sắp xếp câu'; // V135: luyện bổ sung, không đổi lịch FSRS
   return '🎯 Luyện thích ứng';
 }
 function rvRecordAnswer(item, q, correct, ms, official) {
@@ -409,7 +429,8 @@ async function startStudySession(weakMode, forceNew) {
   if (!rvWeakMode && !onlyType) {
     const ex = await rvAddExtras(sessionItems);
     extraCount = ex.extraCount;
-    sessionItems = rvInsertMatch(ex.items);
+    sessionItems = rvInsertOrderSentence(ex.items); // V135: câu sắp xếp câu (luyện bổ sung) trước
+    sessionItems = rvInsertMatch(sessionItems);
   }
   rvQueue.items = sessionItems;
   rvSummary = { reviewCount: reviewCount || 0, newCount: newCount || 0 };
@@ -793,6 +814,10 @@ function rvQuestionBodyHtml(tagLabel, w) {
   const q = rvQuestion, p = q.prompt;
   // V117 — "Kiểm tra trí nhớ thực sự": không hiện pinyin ở đề khi pinyin không phải thứ đang kiểm tra; ẩn dòng "vì sao chọn dạng này".
   const strict = (typeof swStrict === 'function') && swStrict();
+  // V135: 2 dòng phụ này được tính NGAY ĐẦU hàm (trước đây ở cuối) vì nhánh "Sắp xếp câu" trả về sớm cần dùng chúng.
+  const strictTag = strict ? `<div class="rv-strict-tag">🧪 Kiểm tra trí nhớ thực sự${q.hinted ? ' · câu này có gợi ý nên nếu đúng sẽ được ghi là “đúng nhờ gợi ý”' : ''}</div>` : '';
+  const adaptHtml = rvAdaptNote ? `<div class="rv-why">🔔 ${escapeHtml(rvAdaptNote)}</div>` : ''; // V128 giai đoạn 3
+  const whyHtml = adaptHtml + ((q.why && !strict) ? `<div class="rv-why">💡 ${escapeHtml(q.why)}</div>` : '');
   let stem;
   if (p.kind === 'audio') {
     // Khu vực âm thanh nổi bật + nút nghe lại + dòng trạng thái (đã phát / bị chặn). Không tự phát lặp.
@@ -801,6 +826,13 @@ function rvQuestionBodyHtml(tagLabel, w) {
         <div id="rv-audio-status" class="rv-audio-status" role="status" aria-live="polite">Chưa phát — bấm 🔊 để nghe</div>
       </div>
       <div class="rv-prompt">${escapeHtml(p.ask)}</div>`;
+  } else if (p.kind === 'order') {
+    // V135: "Sắp xếp câu" — đề + các mảnh xáo trộn; trình duyệt chấm tức thời rồi báo lên server (server chấm lại).
+    return `
+      <div class="rv-tag">${tagLabel} · ${lessonsLabel(w)}</div>
+      <div class="rv-type-tag">${escapeHtml(QE.TYPES[q.typeId].label)}</div>
+      ${strictTag}${whyHtml}
+      ${typeof OS_UI !== 'undefined' ? OS_UI.playHtml(q) : '<div class="rv-prompt">Thiếu thư viện sắp xếp câu.</div>'}`;
   } else if (p.kind === 'cloze') {
     stem = `<div class="rv-cloze">${escapeHtml(p.main)}</div>
       ${p.sub ? `<div class="rv-cloze-vi">${escapeHtml(p.sub)}</div>` : ''}
@@ -820,9 +852,6 @@ function rvQuestionBodyHtml(tagLabel, w) {
       ${p.sub ? `<div class="rv-cloze-vi">${escapeHtml(p.sub)}</div>` : ''}
       <div class="rv-prompt">${escapeHtml(p.ask)}</div>`;
   }
-  const strictTag = strict ? `<div class="rv-strict-tag">🧪 Kiểm tra trí nhớ thực sự${q.hinted ? ' · câu này có gợi ý nên nếu đúng sẽ được ghi là “đúng nhờ gợi ý”' : ''}</div>` : '';
-  const adaptHtml = rvAdaptNote ? `<div class="rv-why">🔔 ${escapeHtml(rvAdaptNote)}</div>` : ''; // V128 giai đoạn 3
-  const whyHtml = adaptHtml + ((q.why && !strict) ? `<div class="rv-why">💡 ${escapeHtml(q.why)}</div>` : '');
   if (q.typed) { // V110: câu TỰ NHẬP — không có nút lựa chọn
     const isPy = q.typed === 'py';
     return `
@@ -1090,6 +1119,7 @@ function renderReview() {
         ${(r && r.multi && typeof rvmFeedback === 'function') ? rvmFeedback(r) : (r && r.correct ? '✅ Chính xác' : '❌ Chưa đúng — xem lại và thử lại sau ít câu')}
       </div>
       ${(r && r.multi && typeof rvmResultHtml === 'function') ? rvmResultHtml(r) : ''}
+      ${(r && r.order) ? `<div class="os-key">${escapeHtml(r.order.sentence)}</div>` : ''}
       <div class="rv-py">${escapeHtml(w.py || '')}</div>
       ${showMeaning ? `<div class="rv-vi">${escapeHtml(w.vi || '')}</div>` : ''}
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
@@ -1167,6 +1197,11 @@ function bindReview() {
   }
   if (rvPhase !== 'question' || !rvQuestion) return;
   if (rvMulti) return; // V130: câu 3 phần tự cập nhật DOM trong js/review-multi.js
+  if (rvQuestion.prompt && rvQuestion.prompt.kind === 'order') { // V135: gắn trạng thái ô chữ + xử lý khi bấm Kiểm tra
+    const host = document.querySelector('.rv-body');
+    if (host && typeof OS_UI !== 'undefined') OS_UI.playBind(host, rvQuestion, (joined) => rvSubmitOrder(joined));
+    return;
+  }
   if (rvQuestion.typed) {
     // V117: chỉ tự đưa con trỏ vào ô nhập trên máy có chuột/bàn phím vật lý. Trên điện thoại KHÔNG tự bật bàn phím ảo (gây giật bố cục);
     // người học chạm vào ô khi sẵn sàng. Câu nghe-gõ vẫn tự phát âm đúng 1 lần.
@@ -1233,6 +1268,25 @@ async function rvPick(btn) {
 // Trả lời câu LUYỆN BỔ SUNG (check/extra/redo/drill). KHÔNG gọi /api/study/review(/preview) → không đụng
 // lịch FSRS. Chỉ ghi hồ sơ kỹ năng bằng bài luyện bổ sung, đi qua outbox chung (không mất khi mất mạng,
 // không ghi trùng khi gửi lại).
+// V135 — người học bấm "Kiểm tra" ở câu sắp xếp câu. Chấm tức thời bằng js/order-sentence.js để phản hồi ngay;
+// server (/api/skills/practice) chấm LẠI từ câu thật trong dữ liệu — kết quả server mới là nguồn sự thật.
+function rvSubmitOrder(joined) {
+  if (rvSubmitting || rvPhase !== 'question' || !rvQuestion || !rvQuestion.order) return;
+  const item = rvQueue.items[0], w = item.word, q = rvQuestion;
+  rvSubmitting = true;
+  rvPhase = 'answered';
+  const responseTimeMs = Math.max(0, Math.round(performance.now() - rvStartedAt - vtHiddenMs()));
+  const ok = (typeof OS !== 'undefined') ? OS.isOrderCorrect(q.order.sentence, joined) : false;
+  if (ok) playDing(); else playBuzz();
+  if (typeof swSpeakAfterAnswer === 'function') swSpeakAfterAnswer(w.hz); else speak(w.hz);
+  rvRecordAnswer(item, q, ok, responseTimeMs, false);
+  rvLastAnswer = { correct: ok, card: null, autoRating: null, chosen: joined, order: q.order };
+  rvRatingPhase = null;
+  submitSkillPractice({ word: w, exerciseType: q.exercisePractice, selectedAnswer: joined, responseTimeMs, source: rvPracticeSource(item), sessionId: rvQueue.sessionId }).catch(() => {});
+  rvSubmitting = false;
+  render();
+  // Luôn chờ người học bấm "Tiếp tục" (không tự chuyển): câu dài cần thời gian đọc đáp án đúng.
+}
 function rvPickPractice(btn) {
   rvPhase = 'answered'; // chặn bấm đúp ngay lập tức (rvPick thoát sớm khi rvPhase !== 'question')
   const item = rvQueue.items[0];
@@ -1386,8 +1440,10 @@ function rvAdvanceQueue() {
     rvQueue.items.splice(Math.min(RV_NEW_GAP, rvQueue.items.length), 0,
       { type: 'new', word: it.word, introduced: true, introExposurePending: true, skillProfile: it.skillProfile, suggestedSkill: it.suggestedSkill, confusions: it.confusions, lastExerciseType: it.lastExerciseType }); // V114: đây là lượt chính thức ĐẦU sau giới thiệu
   } else if (it && rvIsPractice(it)) {
-    // extra/redo/drill: sai → hỏi lại tối đa RV_DRILL_MAX_TRIES lần, mỗi lần ĐỔI dạng so với lần sai.
-    if (!ok && (it.tries || 0) + 1 < RV_DRILL_MAX_TRIES) {
+    // V135: câu SẮP XẾP CÂU không hỏi lại — mỗi buổi chỉ có vài câu rải rác, hỏi lại sẽ lặp đúng câu vừa sai
+    // (dạng này bị ép nên không "đổi dạng" được). Lịch FSRS không liên quan.
+    if (it.type !== 'order' && !ok && (it.tries || 0) + 1 < RV_DRILL_MAX_TRIES) {
+      // extra/redo/drill: sai → hỏi lại tối đa RV_DRILL_MAX_TRIES lần, mỗi lần ĐỔI dạng so với lần sai.
       const failed = (it.failedTypes || []).concat(rvQuestion ? [rvQuestion.typeId] : []);
       rvQueue.items.splice(Math.min(RV_DRILL_GAP, rvQueue.items.length), 0, Object.assign({}, it, { tries: (it.tries || 0) + 1, failedTypes: failed }));
     }
@@ -1541,6 +1597,43 @@ function rvInsertMatch(items) {
   out.splice(Math.min(out.length, Math.max(1, Math.floor(out.length * 0.7))), 0, { type: 'match', hzs: pick });
   return out;
 }
+// V135 — SẮP XẾP CÂU trong buổi "Hôm nay học". Chèn thêm N câu (mặc định 2, đặt trong Cài đặt hằng ngày) ở khoảng
+// 1/3 và 2/3 buổi để người học gặp rải rác chứ không dồn. Từ để hỏi lấy từ CHÍNH các từ chính thức của buổi
+// (không đổi lịch FSRS của từ nào khác), và chỉ những từ có câu thật trong giáo trình/ví dụ dựng được bài.
+// Đây là LUYỆN BỔ SUNG: item.type = 'order' → nằm trong RV_PRACTICE_TYPES, không đi đường FSRS.
+function rvInsertOrderSentence(items) {
+  const n = rvOrderPerSession();
+  if (!n) return items;
+  const ctx = rvQCtx();
+  const cands = [], seen = new Set();
+  for (const it of items) {
+    if (!rvIsOfficial(it) || !it.word || seen.has(it.word.hz)) continue;
+    seen.add(it.word.hz);
+    if (QE.build('orderSentence', it.word, ctx)) cands.push(it.word); // chỉ từ dựng được câu THẬT mới được chọn
+  }
+  // Ưu tiên từ của CHÍNH buổi. Chưa đủ số câu (kho câu mẫu chỉ phủ một phần từ vựng) → lấy thêm từ CÙNG BÀI đang học,
+  // để buổi học vẫn có bài sắp xếp câu thay vì lặng lẽ không có câu nào. Không đụng tới từ/thẻ ngoài bài.
+  if (cands.length < n) {
+    const lessons = new Set(items.filter(rvIsOfficial).map(it => it.word && it.word.l).filter(Number.isFinite));
+    for (const w of WORDS) {
+      if (cands.length >= n) break;
+      if (!w || !lessons.has(w.l) || seen.has(w.hz)) continue;
+      if (QE.build('orderSentence', w, ctx)) { seen.add(w.hz); cands.push(w); }
+    }
+  }
+  if (!cands.length) return items;
+  const out = items.slice();
+  const count = Math.min(n, cands.length);
+  // Rải đều: câu thứ k nằm ở khoảng (k+1)/(count+1) chiều dài buổi (2 câu → 1/3 và 2/3).
+  // Chèn từ câu CUỐI về đầu để vị trí đã chèn không bị đẩy lệch.
+  for (let k = count - 1; k >= 0; k--) {
+    const frac = (k + 1) / (count + 1);
+    const at = Math.max(1, Math.min(out.length, Math.round(out.length * frac)));
+    out.splice(at, 0, { type: 'order', word: cands[k], skillProfile: null });
+  }
+  return out;
+}
+
 // Bài hiện tại của màn bắt đầu: các bài ĐANG CHỌN (server) mà buổi này thật sự có từ thuộc về (theo liên kết bài HIỆN TẠI
 // `word.lessons`). KHÔNG dùng `word.l` — đó là cột bài cũ, có thể còn số bài đã bị xoá khỏi mục từ vựng.
 function rvBuildStartInfo(items, extraCount, scopeLessons) {
@@ -1556,7 +1649,8 @@ function rvBuildStartInfo(items, extraCount, scopeLessons) {
   const newCount = items.filter(i => i.type === 'new').length;
   const reviewCount = items.filter(i => i.type === 'review').length;
   const matchN = items.filter(i => i.type === 'match').length;
-  return { lessons, newCount, reviewCount, extraCount, estimated: reviewCount + newCount * 2 + extraCount + matchN };
+  const orderN = items.filter(i => i.type === 'order').length; // V135: câu sắp xếp câu (luyện bổ sung) — con số "dự kiến" phải tính cả
+  return { lessons, newCount, reviewCount, extraCount, estimated: reviewCount + newCount * 2 + extraCount + matchN + orderN };
 }
 function rvBeginSession() {
   if (rvStage !== 'start') return;

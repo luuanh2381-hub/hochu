@@ -28,6 +28,11 @@ function bindSkills() {
   if (isLoggedIn() && skState.practice && skState.practice.q && skState.practice.q.typed) { // V110: đặt con trỏ vào ô gõ
     setTimeout(() => { const i = document.getElementById('sk-typed'); if (i) i.focus(); }, 120);
   }
+  // V135: Sắp xếp câu — HTML vừa được chèn, gắn dữ liệu + callback chấm vào ô chơi (dùng chung thư viện với review.js).
+  if (skState.practice && skState.practice.q && skState.practice.q.order && typeof OS_UI !== 'undefined') {
+    const host = document.getElementById('content') || document;
+    OS_UI.playBind(host, skState.practice.q, (joined) => skSubmitOrder(joined));
+  }
   if (!isLoggedIn() || skState.practice) return;
   if (!skState.loaded && !skState.loading) skReload();
 }
@@ -128,6 +133,7 @@ function skRenderPracticeLauncher() {
     ${btn('⌨️ Pinyin — tự gõ có dấu thanh', "skStartPractice('pinyin-typed')", true, '')}
     ${btn('🎵 Luyện thanh điệu — nghe, chọn cách đọc', "skStartPractice('tone')", audioOk, 'Trình duyệt này không có giọng đọc tiếng Trung')}
     ${btn('🧩 Luyện phân biệt từ dễ nhầm', "skStartPractice('confusable')", true, '')}
+    ${btn('🧩 Sắp xếp câu', "skStartPractice('ordersentence')", true, '')}
     ${btn('📜 Hán Việt — chỉ bấm chọn', "skStartPractice('hanviet')", true, '')}
     ${btn('👁 Thanh điệu bằng mắt — chỉ bấm chọn', "skStartPractice('tonevis')", true, '')}
     ${btn('⚔️ A hay B? — các cặp bạn hay nhầm', "skStartPractice('duel')", true, '')}
@@ -203,7 +209,7 @@ function skQCtx() {
   };
 }
 // Chế độ do người học CHỌN TƯỜNG MINH → danh sách dạng câu được phép (không tự đổi sang dạng khác). V132: + hanviet, tonevis (chỉ bấm chọn).
-const SK_FORCED = { confusable: ['confusable'], tone: ['listen2tone'], hanviet: QE.HV_ORDER.slice(), tonevis: ['hz2tone'], 'recall-typed': ['typeVi2hz'], 'pinyin-typed': ['typeHz2py'] };
+const SK_FORCED = { confusable: ['confusable'], tone: ['listen2tone'], hanviet: QE.HV_ORDER.slice(), tonevis: ['hz2tone'], 'recall-typed': ['typeVi2hz'], 'pinyin-typed': ['typeHz2py'], ordersentence: QE.ORDER_ORDER.slice() }; // V135: + sắp xếp câu
 function skTypesFor(skill) { return QE.MCQ_ORDER.concat(rvTypedEnabled() ? QE.TYPED_ORDER : []).filter(t => QE.TYPES[t].skill === skill); } // V110: gồm câu tự nhập khi người học bật
 
 async function skLoadExamplesFor(words) {
@@ -274,6 +280,12 @@ async function skStartPractice(kind) {
       d = await skFetchJson(`/api/skills/practice-words?skill=mixed&limit=40&allowListening=0`);
       const ctx = skQCtx(), ids = SK_FORCED[kind];
       d.words = d.words.filter(it => { const w = WORDS.find(x => x.hz === it.hz); return w && ids.some(t => QE.build(t, w, ctx)); }).slice(0, 10);
+    } else if (kind === 'ordersentence') {
+      // V135: Sắp xếp câu — lấy các từ đã ôn rồi giữ những từ có ÍT NHẤT MỘT câu thật (giáo trình hoặc ví dụ) dựng được
+      // thành bài xếp mảnh. Câu lấy từ dữ liệu, KHÔNG sinh lúc làm bài; không đủ câu → báo rõ thay vì tạo câu giả.
+      d = await skFetchJson('/api/skills/practice-words?skill=mixed&limit=40&allowListening=0');
+      const ctx = skQCtx();
+      d.words = d.words.filter(it => { const w = WORDS.find(x => x.hz === it.hz); return w && QE.build('orderSentence', w, ctx); }).slice(0, 10);
     } else if (kind === 'confusable') {
       // Lấy các từ đã ôn rồi giữ lại những từ THUỘC nhóm chữ dễ nhầm có chú giải (QE.build chỉ dựng được cho các từ này).
       d = await skFetchJson(`/api/skills/practice-words?skill=mixed&limit=30&allowListening=0`);
@@ -289,6 +301,7 @@ async function skStartPractice(kind) {
     }
     if (!d.words.length) {
       alert(kind === 'delayed' ? 'Chưa có từ nào đủ điều kiện kiểm tra sau khoảng nghỉ (cần đã học ổn định, chưa đến hạn ôn và cách lần gặp gần nhất từ 7 ngày).'
+        : kind === 'ordersentence' ? 'Chưa có từ nào có đủ câu mẫu để xếp lại thành câu (cần câu ví dụ 3–12 mảnh trong dữ liệu). Hãy ôn thêm từ ở các tab học trước.'
         : kind === 'confusable' ? 'Chưa có từ nào của bạn thuộc nhóm chữ dễ nhầm để luyện.'
         : kind === 'tf' ? 'Chưa có từ nào đủ dữ liệu để tạo câu Đúng/Sai (cần từ đã ôn và đủ từ khác trong kho để làm khẳng định sai).'
         : kind === 'duel' ? 'Chưa có cặp nào bạn hay nhầm: cần từng chọn nhầm cùng một đáp án từ 2 lần trở lên (trong 180 ngày) và đáp án đó trùng với một từ khác trong kho.'
@@ -370,6 +383,13 @@ function skRenderPractice() {
   } else {
     stem = `<div style="font-size:1.4rem;font-weight:800;text-align:center;margin:10px 0">${escapeHtml(pr.main || '')}</div><div class="rv-prompt" style="text-align:center">${escapeHtml(pr.ask)}</div>`;
   }
+  if (q.order) { // V135: Sắp xếp câu — giao diện dùng CHUNG với màn "Hôm nay học" (js/order-sentence-ui.js)
+    return `<div class="panel">
+      <div style="font-size:.75rem;color:var(--muted);font-weight:700;margin-bottom:6px">Luyện ${SK_LABEL[q.skill]} · ${escapeHtml(QE.TYPES[q.typeId].label)} · Câu ${p.idx + 1}/${p.items.length}</div>
+      ${typeof OS_UI !== 'undefined' ? OS_UI.playHtml(q) : '<div class="rv-prompt">Thiếu thư viện sắp xếp câu.</div>'}
+      <div id="sk-explain" style="font-size:.85rem;color:var(--muted);margin-top:8px"></div>
+      <button class="btn" style="margin-top:12px" onclick="skEndPractice()">Dừng luyện</button></div>`;
+  }
   if (q.typed) { // V110: câu tự nhập
     const isPy = q.typed === 'py';
     return `<div class="panel">
@@ -423,6 +443,34 @@ async function skPick(btn) {
 }
 
 function skSource(p) { return p && p.kind === 'delayed' ? 'delayed' : ((p && (p.kind === 'duel' || p.kind === 'tf')) ? 'binary' : 'mode'); } // V134: câu 2 đáp án → 'binary' (lưu nhưng không cộng điểm kỹ năng)
+// V135: trả lời câu SẮP XẾP CÂU trong buổi luyện bổ sung. Chấm tức thì ở trình duyệt (js/order-sentence.js);
+// server vẫn chấm lại từ câu thật trong giáo trình/ví dụ — client không phải nguồn sự thật.
+async function skSubmitOrder(joined) {
+  const p = skState.practice; if (!p || p.locked || !p.q || !p.q.order) return;
+  p.locked = true;
+  const q = p.q, w = q.word;
+  const responseTimeMs = Math.max(0, performance.now() - p.startedAt - vtHiddenMs());
+  const ok = (typeof OS !== 'undefined') ? OS.isOrderCorrect(q.order.sentence, joined) : false;
+  const ex = document.getElementById('sk-explain');
+  if (ex) {
+    ex.innerHTML = `<div style="color:${ok ? 'var(--l8a)' : 'var(--l10a)'};font-weight:700">${ok ? '✅ Chính xác' : '❌ Chưa đúng'}</div>`
+      + (ok ? '' : `<div>Đáp án chuẩn: ${escapeHtml(q.order.sentence)}</div>`)
+      + q.explanation.map(l => `<div>${escapeHtml(l)}</div>`).join('');
+  }
+  if (ok) playDing(); else playBuzz();
+  speak(w.hz);
+  p.answered++; if (ok) p.correct++;
+  QS.record(p.qSession, q, ok, responseTimeMs);
+  await Promise.all([
+    submitSkillPractice({ word: { hz: w.hz, l: w.l }, exerciseType: q.exercisePractice, selectedAnswer: joined, responseTimeMs, source: skSource(p), sessionId: p.sessionId }),
+    new Promise(r => setTimeout(r, ok ? 2200 : 4000)),
+  ]);
+  if (currentTab !== 'skills' || skState.practice !== p) return;
+  p.idx++;
+  skAdvanceToValid();
+  render();
+}
+
 // V110: trả lời câu tự nhập trong buổi luyện bổ sung (chỉ ghi hồ sơ kỹ năng; KHÔNG đổi FSRS). Chấm tức thì bằng AM; server chấm lại.
 async function skSubmitTyped(skip) {
   const p = skState.practice; if (!p || p.locked || !p.q || !p.q.typed) return;

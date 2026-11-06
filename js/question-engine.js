@@ -19,6 +19,13 @@
 const QE = (function () {
   'use strict';
 
+  // V135: thư viện "sắp xếp câu" dùng chung client/server (js/order-sentence.js). Nạp kiểu UMD nhỏ:
+  // Node (require được) thì require; trình duyệt/test vm thì dùng biến toàn cục `OS` (nạp bằng thẻ <script>
+  // đứng TRƯỚC file này). Không có thư viện → dạng orderSentence chỉ đơn giản không dựng được (trả null).
+  const OS_LIB = (typeof module !== 'undefined' && module.exports && typeof require === 'function')
+    ? require('./order-sentence')
+    : (typeof OS !== 'undefined' ? OS : null);
+
   // ── Danh mục dạng bài ───────────────────────────────────────────────────────────────────────
   // quizType: chiều câu hỏi mà server (/api/study/review) tự chấm. answerField: đáp án là nghĩa|chữ Hán|pinyin.
   const TYPES = {
@@ -62,6 +69,10 @@ const QE = (function () {
     tfHz2py:    { id: 'tfHz2py',    label: 'Đúng/Sai: Chữ Hán → Pinyin', skill: 'pinyin',      quizType: 'hz2py', answerField: 'py', exerciseFsrs: null, exercisePractice: 'practice-tf-pinyin',      practiceOnly: true },
     // Nhìn chữ Hán → chọn cách đọc đúng thanh điệu (nhiễu = cùng chữ, đổi thanh của 1 âm tiết). Giống listen2tone nhưng bằng mắt.
     hz2tone:    { id: 'hz2tone',    label: 'Chữ Hán → Chọn thanh điệu', skill: 'pinyin',    quizType: 'hz2py', answerField: 'py', exerciseFsrs: null, exercisePractice: 'practice-hz2tone', practiceOnly: true },
+    // V135 — SẮP XẾP CÂU: hiện nghĩa tiếng Việt + từ đang học, các "mảnh" (theo TỪ) bị xáo trộn, người học chạm xếp lại.
+    // Chỉ luyện bổ sung (không đi đường FSRS). Câu lấy từ SENTENCES / word_examples (dữ liệu THẬT, không AI sinh lúc làm bài).
+    // Chấm theo CHUỖI ĐÃ CHUẨN HOÁ (js/order-sentence.js) nên không phụ thuộc cách tách mảnh.
+    orderSentence: { id: 'orderSentence', label: 'Sắp xếp câu', skill: 'context', quizType: 'order-sentence', answerField: 'hz', exerciseFsrs: null, exercisePractice: 'practice-order-sentence', practiceOnly: true, needsExample: true, order: true },
   };
   const MCQ_ORDER = ['hz2vi', 'vi2hz', 'listen2hz', 'listen2vi', 'hz2py', 'cloze']; // thứ tự ưu tiên khi hoà điểm
   const PRACTICE_ORDER = ['confusable', 'py2hz', 'py2vi', 'vi2py', 'hz2hv'];       // V117: dạng chỉ luyện bổ sung (trắc nghiệm)
@@ -70,6 +81,9 @@ const QE = (function () {
   const TF_ORDER = ['tfHz2vi', 'tfVi2hz', 'tfHz2py'];                                 // V134: câu Đúng/Sai (chỉ chạy khi người học chọn chế độ riêng, kèm ctx.tfTruth)
   const HV_ORDER = ['hv2vi', 'hv2hz', 'vi2hv'];                                      // V132: nhóm Hán Việt (chỉ bấm chọn; chỉ chạy khi người học chọn chế độ riêng)
   const TYPED_ORDER = ['typeVi2hz', 'typeHz2py'];                                   // V110: chỉ được xét khi người gọi bật allowTyped
+  // V135: "Sắp xếp câu" — CHỈ chạy khi người gọi yêu cầu đích danh (chế độ riêng hoặc chèn chủ động vào buổi học).
+  // KHÔNG nằm trong PRACTICE_ORDER để không tự chen vào mọi câu của buổi (mỗi câu cần câu ví dụ + tương tác chậm hơn).
+  const ORDER_ORDER = ['orderSentence'];
 
   // ── Chuẩn hoá ──────────────────────────────────────────────────────────────────────────────
   function normText(s) {
@@ -174,6 +188,13 @@ const QE = (function () {
     if (typeId === 'hz2hv' || typeId === 'hv2vi' || typeId === 'hv2hz' || typeId === 'vi2hv') return [base];
     if (typeId === 'hz2tone') return [base, `Thanh điệu của từ này: ${toneSequence(word.py).map(t => 'thanh ' + t).join(' + ')}.`];
     if (typeId === 'listen2type') return [`Bạn vừa nghe: ${base}`];
+    if (typeId === 'orderSentence' && extra && extra.order) {
+      return [
+        `Câu đúng: ${extra.order.zh}`,
+        extra.order.vi ? `Nghĩa: ${extra.order.vi}` : '',
+        base,
+      ].filter(Boolean);
+    }
     if (typeId === 'hz2py' || typeId === 'typeHz2py') return [`${word.hz} đọc là ${word.py} (${word.vi}).`];
     return [base];
   }
@@ -482,6 +503,38 @@ const QE = (function () {
     return assemble('cloze', word, ctx,
       { kind: 'cloze', main: blanked, sub: sentence.vi || null, ask: 'Chọn từ điền vào chỗ trống' }, ds, { sentence });
   }
+  // ── V135: SẮP XẾP CÂU ────────────────────────────────────────────────────────────────────────
+  // Câu lấy từ dữ liệu THẬT (SENTENCES trong giáo trình + word_examples), phải chứa ĐÚNG 1 lần từ đang học
+  // (nhờ vậy người học biết mình đang luyện từ nào). Mảnh chữ do js/order-sentence.js cắt theo TỪ; nếu môi
+  // trường không có Intl.Segmenter thì lùi về từng chữ Hán — chấm vẫn đúng vì chấm theo chuỗi chuẩn hoá.
+  function buildOrderSentence(word, ctx) {
+    if (!OS_LIB) return null;
+    const rand = ctx.rand || defaultRand;
+    const pool = [];
+    // Ưu tiên câu ngắn (dễ xếp), sau đó trộn ngẫu nhiên trong nhóm đó để không lặp mãi 1 câu.
+    const cands = OS_LIB.fromSentences(word, ctx.sentences || []).concat(OS_LIB.fromExamples(word, ctx.examples || []));
+    for (const c of cands) {
+      const tiles = OS_LIB.buildTiles(c.zh, rand);
+      if (tiles) pool.push({ sentence: c, tiles });
+    }
+    if (!pool.length) return null;
+    const minLen = Math.min.apply(null, pool.map(p => [...OS_LIB.normalize(p.sentence.zh)].length));
+    const short = pool.filter(p => [...OS_LIB.normalize(p.sentence.zh)].length <= minLen + 4);
+    const pick = short[Math.floor(rand() * short.length)];
+    const T = TYPES.orderSentence;
+    return {
+      typeId: 'orderSentence', hz: word.hz, l: word.l, word,
+      skill: T.skill, quizType: T.quizType,
+      exerciseFsrs: null, exercisePractice: T.exercisePractice, fsrsEligible: false,
+      // Đề KHÔNG hiện chữ Hán của từ (sẽ lộ 1 mảnh): chỉ hiện nghĩa tiếng Việt của câu + nghĩa của từ cần dùng.
+      prompt: { kind: 'order', main: pick.sentence.vi, sub: word.vi ? `Câu này dùng từ có nghĩa: ${word.vi}` : null, ask: 'Chạm các mảnh theo đúng thứ tự để ghép thành câu' },
+      options: [], correctIndex: -1,
+      correctKey: OS_LIB.normalize(pick.sentence.zh),   // server chấm lại từ dữ liệu gốc, đây chỉ để phản hồi tức thời
+      order: { sentence: pick.sentence.zh, vi: pick.sentence.vi || '', tiles: pick.tiles, source: pick.sentence.source },
+      explanation: explain('orderSentence', word, { order: pick.sentence, tiles: pick.tiles }),
+      tip: null, sentence: pick.sentence,
+    };
+  }
   function buildConfusable(word, ctx) {
     const groups = ctx.confuseGroups || [];
     const g = groups.find(gr => gr && Array.isArray(gr.chars) && gr.tip && gr.chars.some(c => c.hz === word.hz));
@@ -531,7 +584,7 @@ const QE = (function () {
     };
   }
 
-  const BUILDERS = { typeVi2hz: buildTypeVi2Hz, typeHz2py: buildTypeHz2Py, hz2vi: buildHz2Vi, vi2hz: buildVi2Hz, listen2hz: buildListen2Hz, listen2vi: buildListen2Vi, hz2py: buildHz2Py, cloze: buildCloze, confusable: buildConfusable, listen2tone: buildListen2Tone,
+  const BUILDERS = { typeVi2hz: buildTypeVi2Hz, typeHz2py: buildTypeHz2Py, hz2vi: buildHz2Vi, vi2hz: buildVi2Hz, listen2hz: buildListen2Hz, listen2vi: buildListen2Vi, hz2py: buildHz2Py, cloze: buildCloze, confusable: buildConfusable, listen2tone: buildListen2Tone, orderSentence: buildOrderSentence,
     py2hz: buildPy2Hz, py2vi: buildPy2Vi, vi2py: buildVi2Py, hz2hv: buildHz2Hv, listen2type: buildListen2Type,
     hz2tone: buildHz2Tone, hv2vi: buildHv2Vi, hv2hz: buildHv2Hz, vi2hv: buildVi2Hv,
     duelHz2vi: buildDuelHz2Vi, duelVi2hz: buildDuelVi2Hz, duelHz2py: buildDuelHz2Py,
@@ -565,8 +618,27 @@ const QE = (function () {
     if (q.typeId === 'tfVi2hz' && String(q.prompt.main).includes(q.word.hz)) return { ok: false, reason: 'đề lộ chữ Hán' };
     return { ok: true };
   }
+  // V135: "Sắp xếp câu" — đề chỉ có NGHĨA (không lộ chữ Hán), các mảnh ghép lại phải đúng câu gốc,
+  // và thứ tự mảnh ban đầu KHÔNG được trùng câu gốc (nếu không thì bấm lần lượt là xong).
+  function validateOrder(q) {
+    if (!q.order || !q.order.sentence) return { ok: false, reason: 'thiếu câu nguồn' };
+    if (!Array.isArray(q.order.tiles) || q.order.tiles.length < 3) return { ok: false, reason: 'quá ít mảnh' };
+    if (!OS_LIB.sentenceUsable(q.order.sentence, q.word.hz)) return { ok: false, reason: 'câu không dùng được cho dạng này' };
+    if (!q.correctKey) return { ok: false, reason: 'thiếu đáp án chuẩn' };
+    if (q.correctKey !== OS_LIB.normalize(q.order.sentence)) return { ok: false, reason: 'đáp án không khớp câu gốc' };
+    if (q.order.tiles.join('') === q.order.sentence) return { ok: false, reason: 'các mảnh chưa bị xáo' };
+    // Các mảnh phải là HOÁN VỊ của cách cắt câu gốc (không thừa, không thiếu, không đổi nội dung).
+    const refTiles = OS_LIB.tokenize(q.order.sentence);
+    const a = q.order.tiles.slice().sort(), b = refTiles.slice().sort();
+    if (a.length !== b.length || a.some((x, i) => x !== b[i])) return { ok: false, reason: 'mảnh không khớp câu gốc' };
+    // Đề không được lộ chữ Hán (chỉ hiện nghĩa tiếng Việt).
+    const stem = String(q.prompt.main || '') + String(q.prompt.ask || '');
+    if (stem.includes(q.word.hz)) return { ok: false, reason: 'đề lộ chữ Hán' };
+    return { ok: true };
+  }
   function validate(q, opts) {
     if (q && TYPES[q.typeId] && TYPES[q.typeId].typed) return validateTyped(q);
+    if (q && TYPES[q.typeId] && TYPES[q.typeId].order) return validateOrder(q);
     if (q && /^tf[A-Z]/.test(String(q.typeId))) return validateTf(q);
     const minOptions = (opts && opts.minOptions) || (q && (q.typeId === 'confusable' || (typeof q.typeId === 'string' && q.typeId.startsWith('duel'))) ? 2 : 3);
     if (!q || !q.options) return { ok: false, reason: 'thiếu câu hỏi' };
@@ -699,7 +771,7 @@ const QE = (function () {
     };
   }
 
-  return { TYPES, MCQ_ORDER, PRACTICE_ORDER, PRACTICE_TYPED_ORDER, HV_ORDER, DUEL_ORDER, TF_ORDER, TYPED_ORDER, build, validate, buildMatch, findDuelDonor, toneSequence, toneVariants, normText, meaningSet, meaningsOverlap, pyKey, findSentences, placeCorrect };
+  return { TYPES, MCQ_ORDER, PRACTICE_ORDER, PRACTICE_TYPED_ORDER, HV_ORDER, DUEL_ORDER, TF_ORDER, TYPED_ORDER, ORDER_ORDER, build, validate, buildMatch, findDuelDonor, toneSequence, toneVariants, normText, meaningSet, meaningsOverlap, pyKey, findSentences, placeCorrect };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = QE;
