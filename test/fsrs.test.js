@@ -206,11 +206,30 @@ test('resolveCurrentLesson(): phạm vi rỗng → fallback bài 1, không throw
   assert.strictEqual(studyScope.resolveCurrentLesson({ currentLesson: null }, []), 1);
 });
 
-test('buildLessonPriorityOrder(): ưu tiên đúng thứ tự bài trước → bài hiện tại → bài sau, TRONG phạm vi trước khi ra ngoài', () => {
-  const { inScopeOrder, outside } = studyScope.buildLessonPriorityOrder(5, [3, 5, 7, 9], [1, 2, 3, 5, 7, 9, 20]);
-  assert.deepStrictEqual(inScopeOrder, [3, 5, 7, 9]);
-  assert.ok(!outside.includes(3) && !outside.includes(5) && !outside.includes(7) && !outside.includes(9));
-  assert.ok(outside.includes(1) && outside.includes(2) && outside.includes(20));
+test('resolveCurrentLesson(): chưa lưu currentLesson nhưng đã học tới Bài 10 → KHÔNG bị đưa về Bài 1', () => {
+  assert.strictEqual(studyScope.resolveCurrentLesson({ currentLesson: null }, [1, 2, 3, 10, 11], [1, 2, 3, 10]), 10);
+});
+
+test('resolveCurrentLesson(): đã học bài ngoài phạm vi đang chọn → vẫn bám bài đã học trong phạm vi', () => {
+  assert.strictEqual(studyScope.resolveCurrentLesson({ currentLesson: null }, [1, 2, 3], [1, 8, 20]), 1);
+});
+
+test('buildLessonPriorityOrder(): bài hiện tại → bài SAU tăng dần → bài TRƯỚC giảm dần', () => {
+  const scope = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  const { inScopeOrder, outside } = studyScope.buildLessonPriorityOrder(10, scope, scope);
+  assert.deepStrictEqual(inScopeOrder, [10, 11, 12, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+  assert.ok(!outside.includes(10), 'bài hiện tại không được nằm ngoài phạm vi');
+});
+
+test('buildLessonPriorityOrder(): bài 1 còn từ mới KHÔNG được đứng trước bài đang học', () => {
+  const scope = [1, 5, 10];
+  assert.deepStrictEqual(studyScope.buildLessonPriorityOrder(10, scope, scope).inScopeOrder, [10, 5, 1]);
+});
+
+test('buildLessonPriorityOrder(): phạm vi chỉ 1 bài → chỉ bài đó, không kéo bài khác vào', () => {
+  const { inScopeOrder, outside } = studyScope.buildLessonPriorityOrder(10, [10], [1, 2, 9, 10, 11]);
+  assert.deepStrictEqual(inScopeOrder, [10]);
+  assert.deepStrictEqual(outside.sort((a, b) => a - b), [1, 2, 9, 11]);
 });
 
 test('bookOfLessonServer(): map đúng bài → Quyển theo BOOKS_RANGES', () => {

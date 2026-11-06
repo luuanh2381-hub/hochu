@@ -19,6 +19,13 @@ mỗi từ bù đủ 3 câu ví dụ (`MIN_EXAMPLES_PER_WORD = 3`). Chi tiết: 
 `.github/workflows/generate-daily.yml` gọi song song `task=examples` + mặc định, mỗi 15 phút trong
 khung 20h–22h UTC. Cần secret `APP_URL` + `CRON_SECRET`. Trần thật là RPD của Gemini free.
 
+## Thứ tự từ mới "Hôm nay học" (sửa 2026-11-06)
+`buildLessonPriorityOrder` giờ là bài hiện tại → bài sau tăng dần → bài trước giảm dần (trước đây bài
+trước đứng đầu, nên đang Bài 10 vẫn mở màn bằng từ Bài 1). Từ đã có dòng `review_history` không còn
+được coi là từ mới dù mất `fsrs_cards` (`getNewWordsByLessonOrder` + `countNewWordsInLessons`).
+`resolveCurrentLesson` nhận thêm `learnedLessons` (từ `getLearnedLessons`) thay vì rơi thẳng về bài 1.
+Test cần DB: `npm run test:lesson-order`.
+
 ## Cố ý CHƯA làm
 Kéo–thả mảnh chữ (chỉ dùng chạm) · sinh câu bằng AI lúc làm bài · tính sắp-xếp-câu vào kế hoạch năng lực V128.
 

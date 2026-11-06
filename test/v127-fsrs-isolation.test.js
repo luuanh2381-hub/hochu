@@ -133,7 +133,7 @@ function loadReal(fake) {
     vnDateKey: () => '2026-10-29', getVocabCounts: async () => ({ 1: 3, 2: 3 }), getBookDefs: async () => [],
     getTodayStudyCounts: async () => ({ newToday: 0, reviewToday: 0 }), countDueFsrsCards: async () => dueRows().length,
     getDueFsrsCards: async (_u, lim) => dueRows().slice(0, lim), getNewWordsByLessonOrder: async (_u, _o, lim) => newRows().slice(0, lim),
-    countNewWordsInLessons: async () => newRows().length, getWeakFsrsCards: async () => [], getLearnedFsrsCards: async () => [],
+    countNewWordsInLessons: async () => newRows().length, getWeakFsrsCards: async () => [], getLearnedFsrsCards: async () => [], getLearnedLessons: async () => [],
     getLessonsByWordIds: async (ids) => { const o = {}; for (const id of ids) { const w = fake.T.vocab_words.find(x => x.id === id); if (w) o[id] = [w.l]; } return o; },
     reviewFsrsCard: async () => { throw new Error('KHÔNG được gọi reviewFsrsCard trong test này'); }, previewAutoRating: async () => { throw new Error('KHÔNG được gọi previewAutoRating'); },
   });
