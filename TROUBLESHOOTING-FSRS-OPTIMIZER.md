@@ -1,6 +1,6 @@
 # FSRS Optimizer trên Vercel — cách tự xác nhận (V83-FIX-v4)
 
-Đọc file này SAU khi đã đọc `AUDIT-REPORT-V83-FSRS-OPTIMIZER-v4.md` (root cause + danh sách file đã
+Đọc file này SAU khi đã đọc `docs/audit/AUDIT-REPORT-V83-FSRS-OPTIMIZER-v4.md` (root cause + danh sách file đã
 sửa). File này CHỈ tập trung vào: **bạn tự chạy các bước nào để chứng minh production đã load được
 optimizer thật** — vì môi trường sửa code này không có mạng, không có Vercel CLI, không có
 `DATABASE_URL`/URL production của bạn, nên KHÔNG có cách nào tôi tự deploy/tự gọi API production để

@@ -358,7 +358,7 @@ Lỗi trong lúc train (kể cả timeout nội bộ của chính native call) �
 loại NGAY trong invocation (không đợi 180s poll mới phát hiện): RETRYABLE (hạ tầng/tạm thời, còn lượt
 `attempt < max_attempts`, mặc định 3) → requeue ngay, GIỮ `training_payload` để resume; NON_RETRYABLE
 (dữ liệu/deployment) hoặc hết lượt → `failed` hẳn, không lặp vô ích. Chi tiết đầy đủ + root cause xem
-`AUDIT-REPORT-V86-FSRS-OPTIMIZER-DURABILITY.md`.
+`docs/audit/AUDIT-REPORT-V86-FSRS-OPTIMIZER-DURABILITY.md`.
 
 **Env var mới** (đều có mặc định an toàn, không bắt buộc set): `FSRS_OPTIMIZER_WORKER_BUDGET_MS`
 (mặc định 200000 — PHẢI nhỏ hơn `maxDuration` THẬT của deployment, tự kiểm tra Vercel Dashboard vì
@@ -379,5 +379,5 @@ try/catch của JS), browser nhận `Failed to fetch` thay vì response. V87 xo�
 sang `GET /api/fsrs-optimizer/diagnostics` (admin-only, `?probe=1` mới thật sự chạm native — KHÔNG được
 FE tự động gọi định kỳ). `GET /api/fsrs-optimizer/health` (không auth/DB/native) dùng để xác nhận
 routing/deployment sống độc lập với mọi lớp còn lại. Chi tiết root cause đầy đủ xem
-`AUDIT-REPORT-V87-FAILED-TO-FETCH.md`.
+`docs/audit/AUDIT-REPORT-V87-FAILED-TO-FETCH.md`.
 

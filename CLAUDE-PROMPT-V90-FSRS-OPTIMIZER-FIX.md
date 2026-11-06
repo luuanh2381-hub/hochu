@@ -6,7 +6,7 @@ Bạn đang sửa project học từ vựng tiếng Trung này. Hãy đọc TOÀ
 - test/fsrs-optimizer.test.js
 - test/fsrs-optimizer.integration.test.js
 - vercel.json
-- AUDIT-REPORT-V90-FSRS-OPTIMIZER-ROOT-CAUSE.md
+- docs/audit/AUDIT-REPORT-V90-FSRS-OPTIMIZER-ROOT-CAUSE.md
 
 MỤC TIÊU DUY NHẤT:
 Sửa lỗi FSRS Optimizer trên Vercel Hobby khiến job chạy đủ dữ liệu nhưng cuối cùng báo:

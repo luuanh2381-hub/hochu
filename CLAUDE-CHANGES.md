@@ -1,6 +1,6 @@
 # CLAUDE-CHANGES.md — Audit lại FSRS Optimizer (sau bản v90)
 
-Ghi ngắn gọn các file đã sửa và mục đích. Chi tiết đầy đủ xem `AUDIT-REPORT-FSRS-OPTIMIZER.md`.
+Ghi ngắn gọn các file đã sửa và mục đích. Chi tiết đầy đủ xem `docs/audit/AUDIT-REPORT-FSRS-OPTIMIZER.md`.
 
 ## File đã sửa (3 file, không có file nào bị xoá/thêm mới)
 
@@ -38,7 +38,7 @@ Không cần migration. Không có bảng/cột mới. Chỉ thêm 1 khoá vào 
 Yêu cầu mới: "AUDIT V91 – FIX FSRS OPTIMIZER DỨT ĐIỂM" — lỗi vẫn tái diễn trên dữ liệu thật (5121
 review/893 card) dù đã sửa V91. Root cause: heartbeat/retry chỉ dừng SẠCH, không tạo thêm THỜI GIAN
 THẬT để train xong trong giới hạn cứng của Vercel — cần dời hẳn `computeParameters()` sang trình duyệt.
-Chi tiết đầy đủ: `AUDIT-REPORT-V92-BROWSER-TRAINING-MIGRATION.md`.
+Chi tiết đầy đủ: `docs/audit/AUDIT-REPORT-V92-BROWSER-TRAINING-MIGRATION.md`.
 
 - `lib/fsrs/optimizer.js`: +5 hàm mới cho browser-training (prepare/create job/heartbeat/cancel/commit),
   sửa `recoverStaleJobsForUser()` thêm nhánh riêng cho job browser. KHÔNG sửa đường server-training cũ.
