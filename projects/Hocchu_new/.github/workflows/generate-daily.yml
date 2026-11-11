@@ -1,0 +1,25 @@
+name: generate-daily
+
+# Vercel Hobby chỉ cho cron dựng sẵn chạy 1 lần/ngày, nên GitHub gọi hộ mỗi 15 phút.
+# Cần 2 secret trong Settings → Secrets and variables → Actions: APP_URL, CRON_SECRET.
+#
+# 3 lượt chạy song song: task=examples (chỉ sinh ví dụ), all (hán việt → chiết tự → ví dụ) và images (ảnh gợi nhớ, V142).
+# An toàn vì quota Gemini được giữ bằng hàng đợi chung trong Postgres (reserveGeminiSlot).
+# Ghim giờ: 20h–23h UTC mỗi ngày (giờ VN 3h–6h sáng) để Neon free không phải thức 24/7.
+on:
+  schedule:
+    - cron: '*/15 20-22 * * *'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        task: [examples, all, images]
+    steps:
+      - name: Gọi /api/cron/generate-daily (task=${{ matrix.task }})
+        run: |
+          curl -fsS --max-time 120 --retry 2 --retry-delay 5 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/generate-daily?task=${{ matrix.task }}"
