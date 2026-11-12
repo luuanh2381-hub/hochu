@@ -94,7 +94,7 @@ function rvLsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 // Mặc định: hệ thống tự chấm (không bắt chọn Again/Hard/Good/Easy ở mỗi thẻ). Bật "chấm thủ công" = luôn hiện 4 nút như V114.
 function rvManualRating() { return rvLsGet('rvManualRating') === '1'; }
 function rvSetManualRating(on) { rvLsSet('rvManualRating', on ? '1' : '0'); if (typeof render === 'function') render(); }
-// Độ dài mỗi phiên (số thẻ chính thức): 0 = không giới hạn (mặc định, giữ hành vi cũ). Phần còn lại vẫn nằm trên server, "Học tiếp" lấy tiếp.
+// (Ghi chú lịch sử: TRƯỚC V138 khoá `rvSessionCards` có nghĩa "0 = không giới hạn"; từ V138 0 = TẮT thẻ chính thức — xem V149 bên dưới.)
 // V138 — số câu luyện THEO CÂU mỗi buổi (0–15, mặc định 6). Đây là trần cho số THẺ FSRS được hỏi trong buổi này
 // (mỗi thẻ hỏi bằng 1 câu ví dụ; KHÔNG tạo thẻ mới, KHÔNG phải câu bổ sung ngoài số thẻ). 0 = tắt phần thẻ chính
 // thức (buổi chỉ còn câu luyện bổ sung). Dùng lại khoá localStorage cũ `rvSessionCards` để không mất lựa chọn.
@@ -109,7 +109,11 @@ function rvSentenceCountSetting() {
   let n = parseInt(v2, 10);
   if (!Number.isFinite(n)) {
     const old = parseInt(rvLsGet('rvSessionCards'), 10);
-    if (!Number.isFinite(old) || old === 6) return 'all';
+    // V149 FIX ("hệ thống không trả thẻ ôn tập"): ở bản trước V138 khoá cũ `rvSessionCards` có nghĩa "0 = KHÔNG giới hạn" (và 0 là mặc định),
+    // còn từ V138 số 0 bị đổi nghĩa thành "TẮT thẻ chính thức". Máy nào còn giá trị '0' cũ (hoặc số âm/rác) sẽ bị tắt sạch thẻ ôn + từ mới dù
+    // dashboard vẫn báo "Cần ôn 100 · Từ mới 20" (buổi học chỉ còn câu luyện bổ sung). Giá trị cũ ≤ 0 → coi như chưa chọn ('all').
+    // Chỉ khoá MỚI `rvSessionCardsV2` (người học tự chọn "Tắt" trong Cài đặt) mới được phép là 0.
+    if (!Number.isFinite(old) || old <= 0 || old === 6) return 'all';
     n = old;
   }
   return Math.max(0, Math.min(15, Math.round(n)));
@@ -399,6 +403,19 @@ async function rvFetchFreshSession(ignoreDayDedupe) {
 // danh sách do server/FSRS trả về (cùng ngân sách ngày, cùng thứ tự); không tạo nguồn dữ liệu riêng, không đổi lịch ôn.
 // Chỉ áp dụng cho phiên MỚI; phiên đang dở được khôi phục nguyên trạng. Dùng 1 lần rồi tự xoá để "Học tiếp" quay lại bình thường.
 let rvOnlyType = null;
+// V149: số thẻ chính thức (ôn + mới) mà server đã trả nhưng bị loại vì người học ĐANG ĐẶT "Số thẻ tối đa mỗi buổi = Tắt". 0 = không có chuyện đó.
+// Dùng để màn bắt đầu nói rõ lý do thay vì im lặng hiện "0 từ mới / 0 thẻ ôn".
+let rvCapOffSkipped = 0;
+function rvSavedSessionIsHollow(saved) {
+  return !!saved && Array.isArray(saved.items) && !(saved.answeredCount > 0) && !saved.items.some(rvIsOfficial);
+}
+// Nút "Bật lại thẻ ôn tập" trên màn bắt đầu/dashboard: về mặc định 'all', bỏ phiên đã lưu (đang chứa buổi rỗng) rồi nạp lại từ server.
+function rvEnableOfficialCards() {
+  rvSetSentenceCount('all');
+  try { sqClearPersisted(rvStorageMode()); } catch {}
+  if (typeof invalidateTodayDashboardCache === 'function') invalidateTodayDashboardCache();
+  return startStudySession(false, false);
+}
 function startStudyMode(kind) {
   rvOnlyType = (kind === 'due' || kind === 'new') ? kind : null;
   ssEnterMode('review');
@@ -412,7 +429,11 @@ async function startStudySession(weakMode, forceNew) {
     // FIX (Vấn đề 3 — "Học tiếp" phải khôi phục ĐỦ queue/currentIndex/lessonFilter/completedCards/
     // answeredCards/seenCards): đọc thẳng qua sqReadPersisted() dùng chung với 4 tab kia, rồi gán
     // trực tiếp vào rvQueue (thay vì trước đây copy tay từng field vào các biến rời rvSession/...).
-    const saved = sqReadPersisted(savedKey);
+    let saved = sqReadPersisted(savedKey);
+    // V149 FIX: phiên đã lưu CHƯA trả lời câu nào mà không có thẻ chính thức (ôn/mới) nào — chỉ toàn câu luyện bổ sung — là phiên "rỗng"
+    // do lỗi cũ (vd trần số thẻ = 0) để lại. Khôi phục nó sẽ nhốt người học trong phiên lỗi suốt cả ngày dù server còn thẻ đến hạn →
+    // bỏ và nạp phiên mới từ server.
+    if (saved && rvSavedSessionIsHollow(saved)) { sqClearPersisted(savedKey); saved = null; }
     if (saved && saved.items.length && sqLessonFilterMatches(saved.lessonFilter)) {
       const filteredItems = saved.items.filter(it => (it.type !== 'review' && it.type !== 'new') || !sessionKnownHz.has(it.word.hz)); // V106: chỉ lọc thẻ FSRS đã biết; giữ câu luyện bổ sung
       const purged = saved.items.length - filteredItems.length;
@@ -430,7 +451,7 @@ async function startStudySession(weakMode, forceNew) {
         rvLog = (saved.extra && Array.isArray(saved.extra.log)) ? saved.extra.log : []; rvRestoreQSession();
         rvNormalizeIntroFlags(rvQueue.items, rvLog); // V114: hàng đợi lưu từ V113 chưa có cờ introExposurePending
         rvStage = 'run'; rvStartInfo = null; rvMatch = null;
-        rvBlockedByBacklog = false; rvTotalDue = 0; // phiên đang khôi phục chắc chắn có thẻ thật, không liên quan lý do "bị chặn"
+        rvBlockedByBacklog = false; rvTotalDue = 0; rvCapOffSkipped = 0; // phiên đang khôi phục chắc chắn có thẻ thật, không liên quan lý do "bị chặn"
         rvExamplePool = []; rvLastAnswer = null; rvAdaptNote = '';
         rvLearner = (saved.extra && saved.extra.learner && saved.extra.learner.v === 1) ? saved.extra.learner : null; // V127: phiên lưu từ V126 chưa có → null (bộ chọn chạy như V126)
         goTab('review');
@@ -469,8 +490,10 @@ async function startStudySession(weakMode, forceNew) {
   // từ mới sau), chỉ cắt phần cuối; phần bị cắt vẫn còn trên server (chưa trả lời nên chưa bị trừ ngân sách ngày)
   // và "Học tiếp" sẽ lấy tiếp. 0 = tắt phần thẻ chính thức (buổi chỉ còn câu luyện bổ sung).
   const cap = rvSentenceCount();
+  rvCapOffSkipped = 0;
   if (!rvWeakMode && list.length > cap) {
     if (cap === 0) {
+      rvCapOffSkipped = list.length; // V149: ghi lại để màn bắt đầu giải thích (không còn im lặng)
       list = [];
     } else {
       // FIX V124: cắt thẳng phần cuối làm TỪ MỚI (xếp sau thẻ đến hạn) không bao giờ vào phiên khi thẻ đến hạn ≥ cap.
@@ -539,6 +562,7 @@ async function rvRelearnFromStart() {
   const { list, error, reviewCount, newCount, blockedByBacklog, totalDue, learner } = await rvFetchFreshSession(true);
   if (error) { alert(error); goTab('today'); return; }
   rvLearner = learner || null; // V127
+  rvCapOffSkipped = 0; // V149: "Học lại từ đầu" không áp trần số thẻ
   rvQueue.items = list;
   rvSummary = { reviewCount: reviewCount || 0, newCount: newCount || 0 };
   rvBlockedByBacklog = !!blockedByBacklog;
@@ -1095,6 +1119,7 @@ function rvStartHtml() {
       ${cell('~' + i.estimated, 'Số câu dự kiến')}
     </div>
     ${rvBlockedByBacklog ? `<div class="rv-explain">⏳ Đang có ${rvTotalDue} thẻ cần ôn, nên hệ thống tạm chặn học thêm từ mới cho đến khi ôn hết.</div>` : ''}
+    ${rvCapOffSkipped > 0 ? `<div class="rv-explain" role="alert">⚠️ Cài đặt “Số thẻ tối đa mỗi buổi học” đang là <b>Tắt</b> nên ${rvCapOffSkipped} thẻ ôn/từ mới KHÔNG được đưa vào buổi này (chỉ còn câu luyện bổ sung).<div style="text-align:center;margin-top:8px"><button class="btn btn-primary" onclick="rvEnableOfficialCards()">Bật lại thẻ ôn tập</button></div></div>` : ''}
     ${rvPlanHtml()}
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px">
       <button class="btn btn-primary" onclick="rvBeginSession()">▶️ Bắt đầu học</button>
@@ -1195,13 +1220,16 @@ function renderReview() {
     // FIX (audit — màn "Xong phiên học! Đã ôn 0 từ, học 0 từ mới" gây hiểu lầm là lỗi): tách riêng
     // "chưa từng có gì để học" (kèm lý do cụ thể) khỏi "đã thật sự học xong 1 phiên có thẻ".
     if (rvLog.length === 0 && rvSummary.reviewCount === 0 && rvSummary.newCount === 0) {
-      const reason = rvBlockedByBacklog
-        ? `⏳ Phạm vi đang chọn có ${rvTotalDue} thẻ CẦN ÔN đến hạn, nhiều hơn số lượt ôn còn lại hôm nay — hệ thống đang chặn học từ mới cho tới khi ôn bớt backlog này`
-        : `Không có thẻ nào đến hạn ôn hoặc còn trong ngân sách từ mới hôm nay ở phạm vi Quyển/bài đang chọn.`;
+      const reason = rvCapOffSkipped > 0
+        ? `⚠️ Cài đặt “Số thẻ tối đa mỗi buổi học” đang là Tắt nên ${rvCapOffSkipped} thẻ ôn/từ mới không được đưa vào buổi học.`
+        : (rvBlockedByBacklog
+          ? `⏳ Phạm vi đang chọn có ${rvTotalDue} thẻ CẦN ÔN đến hạn, nhiều hơn số lượt ôn còn lại hôm nay — hệ thống đang chặn học từ mới cho tới khi ôn bớt backlog này`
+          : `Không có thẻ nào đến hạn ôn hoặc còn trong ngân sách từ mới hôm nay ở phạm vi Quyển/bài đang chọn.`);
       return `<div class="rv-done">
         <div class="rv-done-num">📭</div>
         <div style="font-size:1.3rem;font-weight:800;margin:10px 0;">Chưa có gì để học</div>
         <div style="color:var(--muted);margin-bottom:20px;">${reason}</div>
+        ${rvCapOffSkipped > 0 ? `<button class="btn btn-primary" style="margin-bottom:10px" onclick="rvEnableOfficialCards()">Bật lại thẻ ôn tập</button><br>` : ''}
         <button class="btn btn-primary" onclick="goTab('today')">Về Hôm nay học</button>
       </div>`;
     }

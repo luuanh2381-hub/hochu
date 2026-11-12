@@ -325,9 +325,13 @@ function renderTodayPanel(data) {
   // dashboard vẫn báo "Cần ôn 50" khiến người học tưởng thiếu câu.
   const sessionCap = tdSessionCapSetting();
   const planned = (data.dueCount || 0) + (data.newInCurrentLesson || 0);
-  const capLine = (typeof sessionCap === 'number' && sessionCap > 0 && planned > sessionCap)
-    ? `<div class="td-limit">📏 Mỗi buổi chỉ lấy tối đa ${sessionCap} thẻ (đang còn ${planned} thẻ hôm nay) — bấm “Học tiếp” cuối buổi để lấy thêm, hoặc đổi ở Cài đặt hằng ngày.</div>`
-    : '';
+  // V149: trần = 0 ("Tắt") trước đây KHÔNG có dòng nào (điều kiện `sessionCap > 0`) nên dashboard báo "Cần ôn 100" mà buổi học không có thẻ ôn nào, người học
+  // không biết vì sao. Nay nói rõ + 1 nút bật lại.
+  const capLine = (typeof sessionCap === 'number' && sessionCap === 0 && planned > 0)
+    ? `<div class="td-limit" role="alert" style="color:var(--l10a,#c0392b)">⚠️ “Số thẻ tối đa mỗi buổi học” đang là <b>Tắt</b> nên ${planned} thẻ ôn/từ mới ở trên sẽ KHÔNG vào buổi học. <button class="btn" style="padding:4px 10px;font-size:.75rem;margin-left:4px" onclick="rvSetSentenceCount('all'); invalidateTodayDashboardCache(); render()">Bật lại</button></div>`
+    : ((typeof sessionCap === 'number' && sessionCap > 0 && planned > sessionCap)
+      ? `<div class="td-limit">📏 Mỗi buổi chỉ lấy tối đa ${sessionCap} thẻ (đang còn ${planned} thẻ hôm nay) — bấm “Học tiếp” cuối buổi để lấy thêm, hoặc đổi ở Cài đặt hằng ngày.</div>`
+      : '');
   const leechBtn = (mem && mem.leech > 0)
     ? `<button class="btn" style="width:100%;margin-top:8px;background:var(--l7c,#fdebd0);color:var(--l7a,#b25f22);" onclick="startLeechSession()">🧲 Học riêng ${mem.leech} từ cứng đầu</button>` : '';
   const detail = `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:800;font-size:.9rem;padding:6px 0">📊 Chi tiết số liệu</summary>
