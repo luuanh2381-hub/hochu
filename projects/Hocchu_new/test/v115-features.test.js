@@ -402,8 +402,9 @@ test('V146: mặc định KHÔNG cắt thẻ (lấy đủ số server trả); đ
 test('V146: số thẻ/buổi kẹp 0–15 hoặc "all" (mặc định), giá trị rác → 0; khoá cũ chỉ giữ lựa chọn rõ ràng khác 6', () => {
   const ctx = makeEnv();
   for (const [v, exp] of [['0', 0], ['2', 2], ['6', 6], ['15', 15], ['16', 15], ['99', 15], ['-4', 0], ['abc', 0], ['all', Infinity]]) { R(ctx, `rvSetSentenceCount('${v}')`); assert.strictEqual(R(ctx, 'rvSentenceCount()'), exp, v); }
-  // khoá cũ rvSessionCards (V138): 6 từng là mặc định → coi như chưa chọn ('all'); 2/10/15/0 là lựa chọn thật → giữ
-  for (const [old, exp] of [['6', Infinity], ['2', 2], ['10', 10], ['15', 15], ['0', 0], ['rác', Infinity]]) {
+  // khoá cũ rvSessionCards (V138): 6 từng là mặc định → coi như chưa chọn ('all'); 2/10/15 là lựa chọn thật → giữ.
+  // V149: '0' của khoá cũ KHÔNG còn được giữ — trước V138 nó nghĩa "không giới hạn" (mặc định); giữ nguyên làm 0 = tắt sạch thẻ ôn + từ mới (lỗi "không trả thẻ ôn tập").
+  for (const [old, exp] of [['6', Infinity], ['2', 2], ['10', 10], ['15', 15], ['0', Infinity], ['rác', Infinity]]) {
     const e = makeEnv(); R(e, `rvLsSet('rvSessionCards', '${old}')`); assert.strictEqual(R(e, 'rvSentenceCount()'), exp, 'khoá cũ ' + old);
   }
   const e2 = makeEnv(); R(e2, "rvLsSet('rvSessionCards', '2')"); R(e2, "rvSetSentenceCount('all')"); assert.strictEqual(R(e2, 'rvSentenceCount()'), Infinity, 'khoá mới thắng khoá cũ');
