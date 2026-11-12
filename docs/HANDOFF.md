@@ -3,6 +3,15 @@
 Cập nhật lần cuối: 2026-11-10 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V149 — Sửa "hệ thống không trả thẻ ôn tập" (2026-11-13)
+Lỗi: dashboard báo "Cần ôn 100 · Từ mới 20" nhưng bấm "Bắt đầu học" ra "0 Từ mới · 0 Thẻ đến hạn ôn · 1 Từ cần luyện thêm" (server vẫn trả đủ thẻ — thẻ bị loại ở CLIENT).
+Nguyên nhân gốc: khoá localStorage cũ `rvSessionCards` trước V138 nghĩa "0 = không giới hạn" (mặc định); V138 đổi 0 thành "TẮT thẻ chính thức" và V146 giữ nguyên '0' cũ khi chuyển sang `rvSessionCardsV2`
+→ `startStudySession` cắt `list = []`. Dashboard chỉ cảnh báo khi trần > 0 nên không báo gì. Phiên rỗng đó còn được `sqPersist` lưu và khôi phục lại ở lần "Bắt đầu học" sau.
+Đã sửa: (1) `rvSentenceCountSetting()` coi khoá cũ ≤ 0 là `'all'` (chỉ khoá V2 mới được là 0); (2) `rvSavedSessionIsHollow()` — phiên đã lưu 0 câu đã trả lời + 0 thẻ chính thức bị bỏ, nạp lại từ server;
+(3) trần "Tắt" tường minh vẫn được tôn trọng nhưng dashboard + màn bắt đầu + màn "Chưa có gì để học" nói rõ lý do và có nút "Bật lại thẻ ôn tập" (`rvEnableOfficialCards()`).
+Test: `npm run test:v149` (12 test; trên mã V148 gốc FAIL 7/12). Đã sửa test V115 cũ khẳng định khoá cũ '0' → 0.
+**Chưa kiểm chứng:** chưa chạy với Postgres/trình duyệt thật. Giả thuyết nguyên nhân khớp hoàn toàn ảnh chụp nhưng không thể đọc localStorage trên máy người dùng — nếu sau khi deploy vẫn thấy 0 thẻ, mở DevTools → Application → Local Storage và gửi giá trị `rvSessionCards` / `rvSessionCardsV2` / `dayKnownHz_*`.
+
 ## V148 — Bỏ R2 khỏi âm thanh: Edge-TTS gọi TRỰC TIẾP (2026-11-11, chưa deploy, chưa thử trên thiết bị thật)
 Client: IndexedDB (máy người học) → `POST /api/tts` (Python `api/edge-tts.py`) → Web Speech dự phòng. KHÔNG còn bước hỏi server/R2, không còn hedge.
 Đã xoá: `lib/audio-library.js`, route `/api/audio/resolve` + `/api/r2/health`, token nội bộ `AUDIO_INTERNAL_TOKEN` / `AUDIO_TTS_URL`, test V141.
