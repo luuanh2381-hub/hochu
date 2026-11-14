@@ -44,7 +44,7 @@ test('db.js: sửa lượt (khoá hàng, tỉa vocab không còn trong câu), th
   assert.ok(/L < 1 \|\| L > 9999/.test(a) && /!status\[c\.hz\]/.test(a) && /tag: 'hoi-thoai'/.test(a) && /importVocab\(missing\.map[\s\S]*?\}\)\), false\)/.test(a), 'không ghi đè, không gắn thêm bài cho từ đã có');
   assert.ok(/gen_status = 'draft'[\s\S]*EXISTS \(SELECT 1 FROM conversation_turns/.test(db.slice(db.indexOf('async function approveAllConversationDrafts'))));
   assert.ok(/Asia\/Ho_Chi_Minh/.test(db.slice(db.indexOf('async function countConversationsGeneratedToday'))));
-  assert.ok(/lược đồ hội thoại: ' \+ \(convoGenSchemaLastError/.test(db), 'lỗi lược đồ nêu nguyên nhân thật');
+  assert.ok(/wrapDbError\(e, \{ category: 'connection' \}\)/.test(db) && /lược đồ hội thoại — /.test(read('lib/conversation-schema.js')), 'lỗi lược đồ nêu nguyên nhân thật (V154: ConversationSchemaError)');
 });
 
 test('api: route mới bắt buộc admin (vocab-status chỉ cần đăng nhập, ≤100 từ); route sinh & cron dùng chung runConversationGeneration; hạn mức ngày; lỗi lược đồ → 503 rõ ràng', () => {
@@ -58,7 +58,7 @@ test('api: route mới bắt buộc admin (vocab-status chỉ cần đăng nhậ
   assert.ok((api.match(/runConversationGeneration\(/g) || []).length >= 3, 'định nghĩa + route + cron');
   assert.ok(/task === 'conversations'/.test(api) && /respectDailyLimit: true/.test(api) && /respectDailyLimit: ids\.length === 0/.test(api));
   assert.ok(/CONVERSATION_GEN_DAILY_LIMIT/.test(api) && /skipped_limit/.test(api));
-  assert.ok(/status\(503\)/.test(api.slice(api.indexOf("app.get('/api/admin/conversations'"), api.indexOf("app.post('/api/admin/conversations/generate'"))));
+  assert.ok(/convoFail\(res, e\)/.test(api.slice(api.indexOf("app.get('/api/admin/conversations'"), api.indexOf("app.post('/api/admin/conversations/generate'"))) && /status: 503/.test(read('lib/conversation-schema.js')), 'V154: lỗi lược đồ → 503 qua convoFail');
 });
 
 // ── Giao diện (chạy thật trong vm) ──

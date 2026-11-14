@@ -121,19 +121,23 @@ test('cắt giữa chừng → lần sau yêu cầu viết ngắn hơn', async (
 // ── DB (đọc mã nguồn) ──
 test('lib/db.js: người học chỉ thấy bài READY; admin (includeUnready) thấy tất cả; thống kê chỉ đếm bài ready', () => {
   const db = read('lib/db.js');
-  assert.ok(/if \(genOk && !filters\.includeUnready\) query \+= " AND gen_status = 'ready'"/.test(db));
-  assert.ok(/async function getConversationWithTurns\(conversationId, opts = \{\}\)/.test(db) && /genOk && !opts\.includeUnready/.test(db));
-  assert.ok(/WHERE is_active = true\$\{genOk \? " AND gen_status = 'ready'" : ''\}/.test(db));
+  // V154: lược đồ luôn được đảm bảo trước truy vấn (không còn nhánh genOk) → luôn lọc gen_status
+  assert.ok(/if \(!filters\.includeUnready\) query \+= " AND gen_status = 'ready'"/.test(db));
+  assert.ok(/async function getConversationWithTurns\(conversationId, opts = \{\}\)/.test(db) && /\(!opts\.includeUnready \? " AND gen_status = 'ready'" : ''\)/.test(db));
+  assert.ok(/WHERE is_active = true AND gen_status = 'ready'/.test(db));
 });
 
 test('lib/db.js: ensure lược đồ idempotent + khoá tư vấn + không làm gãy khi thất bại; bài có sẵn lượt thoại → ready', () => {
   const db = read('lib/db.js');
-  const i = db.indexOf('function ensureConversationGenSchema'); const blk = db.slice(i, i + 4200);
-  assert.ok(/pg_advisory_xact_lock/.test(blk) && /ADD COLUMN IF NOT EXISTS gen_status/.test(blk));
-  assert.ok(/DROP CONSTRAINT conversations_total_turns_check/.test(blk) && /CHECK \(total_turns >= 12\)/.test(blk));
-  assert.ok(/CREATE UNIQUE INDEX IF NOT EXISTS uq_conversation_turns_pos/.test(blk) && /EXCEPTION WHEN unique_violation/.test(blk));
-  assert.ok(/SET gen_status = 'ready'[\s\S]*EXISTS \(SELECT 1 FROM conversation_turns/.test(blk), 'bài đã có lượt thoại không biến mất khỏi thư viện');
-  assert.ok(/ROLLBACK/.test(blk) && /convoGenSchemaPromise = null/.test(blk) && /return false/.test(blk));
+  // V154: logic khởi tạo nằm ở lib/conversation-schema.js (db.js chỉ uỷ quyền); kiểm đúng nơi chứa logic
+  assert.ok(/async function ensureConversationGenSchema\(client\)[\s\S]{0,120}convoSchema\.ensureConversationSchema\(client\)/.test(db));
+  const blk = read('lib/conversation-schema.js');
+  assert.ok(/pg_advisory_xact_lock/.test(blk) && /ADD COLUMN IF NOT EXISTS gen_status/.test(require('../lib/conversation-schema.js').DDL_GEN_COLUMNS));
+  const ddl = require('../lib/conversation-schema.js').DDL_GEN_CONSTRAINTS; // V154: DDL dựng từ hằng số → kiểm trên chuỗi SQL thật
+  assert.ok(/DROP CONSTRAINT conversations_total_turns_check/.test(ddl) && /CHECK \(total_turns >= 12\)/.test(ddl));
+  assert.ok(/CREATE UNIQUE INDEX IF NOT EXISTS uq_conversation_turns_pos/.test(ddl) && /EXCEPTION WHEN unique_violation/.test(ddl));
+  assert.ok(/SET gen_status = 'ready'[\s\S]*EXISTS \(SELECT 1 FROM conversation_turns/.test(require('../lib/conversation-schema.js').SQL_BACKFILL_READY), 'bài đã có lượt thoại không biến mất khỏi thư viện');
+  assert.ok(/ROLLBACK/.test(blk) && /inflight = null; throw e;/.test(blk) && /KHÔNG cache lỗi/.test(blk), 'thất bại → hoàn tác và cho thử lại (không cache lỗi)');
 });
 
 test('lib/db.js: saveGeneratedConversation = 1 transaction ngắn, khoá hàng, xoá-rồi-chèn nhiều dòng, reset tiến độ, thành nháp', () => {
