@@ -473,6 +473,13 @@ async function loadConvoAdmin() {
   const failed = items.filter((x) => x.gen_status === 'failed').slice(0, 5);
   const row = (x, extra) => `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0">
       <span style="flex:1;min-width:140px">${escapeHtml(x.title_zh)} <small style="opacity:.7">${escapeHtml(x.title_vi)}</small></span>${extra}</div>`;
+  // V154: DB chưa có (đủ) 200 hội thoại đầu bài → báo rõ + nút nhập (admin tự bấm, không tự chạy)
+  const dr = r.dataReport;
+  const missingBox = dr && !dr.complete
+    ? `<div style="margin-top:8px;padding:8px;border:1px dashed #c0392b;border-radius:8px;font-size:.85rem">
+         ⚠️ Database mới có <strong>${dr.presentTotal | 0}/${dr.expectedTotal | 0}</strong> hội thoại đầu bài (thiếu batch ${(dr.needBatches || []).join(', ')}). Chưa có bài thì chưa thể sinh lượt thoại.
+         <div style="margin-top:6px"><button class="btn btn-primary btn-sm" id="convo-import-btn" onclick="convoImportBatches()">📥 Nhập ${(dr.expectedTotal | 0) - (dr.presentTotal | 0)} hội thoại còn thiếu</button></div></div>`
+    : '';
   live.innerHTML = `<details class="panel" style="margin-bottom:10px" open>
     <summary style="cursor:pointer"><strong>🛠 Quản trị hội thoại</strong> — ⏳ ${c.pending | 0} chờ · 📝 ${c.draft | 0} nháp · ✅ ${c.ready | 0} đã duyệt · ⚠️ ${c.failed | 0} lỗi</summary>
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
@@ -481,6 +488,7 @@ async function loadConvoAdmin() {
       <button class="btn btn-sm" id="convo-auto-btn" onclick="convoAutoRun()">${convoAutoRunning ? '⏹ Dừng' : '⚡ Sinh tự động'}</button>
       ${c.draft > 1 ? `<button class="btn btn-sm" onclick="convoApproveAll(${c.draft | 0})">✅ Duyệt tất cả (${c.draft | 0})</button>` : ''}
     </div>
+    ${missingBox}
     <div id="convo-gen-msg" style="font-size:.8rem;margin-top:6px;min-height:1em"></div>
     ${drafts.length ? '<div style="margin-top:8px"><strong>Bản nháp chờ duyệt</strong>' + drafts.map((x) => row(x,
       `<span style="opacity:.7">${Number(x.total_turns) || 0} lượt</span>
@@ -572,6 +580,21 @@ async function convoAutoRun() {
   convoAutoRunning = false; convoGenBusy = false;
   await loadConvoAdmin();
   convoGenMsg(`${why || (convoAutoStopFlag ? '⏹ Đã dừng' : 'Đã chạy xong số vòng tối đa')} — ${drafted} bản nháp mới, ${failedN} lỗi.`);
+}
+
+// V154: nhập các batch hội thoại còn thiếu (idempotent trên server: ON CONFLICT DO NOTHING)
+let convoImporting = false;
+async function convoImportBatches() {
+  if (convoImporting) return;
+  if (!confirm('Nhập các hội thoại đầu bài còn thiếu vào database? Bài đã có sẽ KHÔNG bị ghi đè.')) return;
+  convoImporting = true;
+  const btn = document.getElementById('convo-import-btn'); if (btn) btn.disabled = true;
+  try {
+    const r = await convoRequest('POST', '/admin/conversations/import-batches', {});
+    if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không nhập được')); return; }
+    await loadConvoAdmin();
+    convoGenMsg(`✅ Đã nhập ${r.added | 0} hội thoại mới.`);
+  } finally { convoImporting = false; if (btn) btn.disabled = false; }
 }
 
 async function convoApproveAll(n) {
@@ -692,6 +715,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = {
   convoFmtExplain,
   convoAutoRun,
   convoApproveAll,
+  convoImportBatches,
   convoApproveAndNext,
   convoEditTurn,
   convoSaveTurn,
