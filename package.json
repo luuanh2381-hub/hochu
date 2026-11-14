@@ -42,6 +42,7 @@
     "test:v146": "node test/v146-session-size.test.js",
     "test:v149": "node test/v149-legacy-cap.test.js",
     "test:v150": "node test/v150-exercise-tier.test.js",
+    "test:v151": "node test/v151-image-button.test.js",
     "test:v144": "node test/v144-word-image-admin.test.js",
     "test:v145": "node test/v145-conversation.test.js",
     "test:v110": "npm run test:answer-match && npm run test:retention && npm run test:v110-ui && npm run test:adaptive-v111 && npm run test:study-time && npm run test:v113 && npm run test:v114 && npm run test:v115 && npm run test:v116 && npm run test:v117 && npm run test:v118 && npm run test:v127 && npm run test:v128 && npm run test:v128-p2 && npm run test:v128-p3 && npm run test:v128-p4 && npm run test:v129 && npm run test:v130 && npm run test:v131 && npm run test:v131b",
