@@ -163,6 +163,8 @@ function renderConvoList() {
       <button class="btn btn-sm" onclick="searchConversations()">🔍 Tìm</button>
     </div>
 
+    <div id="convo-admin"></div>
+
     <div id="convo-list-body"></div>
 
     <div id="convo-status" style="font-size:.8rem;opacity:.8;margin-top:6px;min-height:1em"></div>
@@ -190,6 +192,8 @@ function renderConvoDetail(convo) {
         <button class="btn btn-sm" onclick="toggleFavorite(${Number(convo.id)}, ${!progress.is_favorited})">${progress.is_favorited ? '★ Yêu thích' : '☆ Thêm yêu thích'}</button>
       </div>
     </div>
+
+    ${convoAdminBar(convo)}
 
     <div style="margin-bottom:10px;font-size:.9rem;opacity:.8">
       <strong>Tình huống:</strong> ${escapeHtml(convo.situation || 'Không có mô tả tình huống')}
@@ -233,8 +237,8 @@ function renderConvoTurn(convo, turn, index) {
       </select>
     </div>
     ${info.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${info.join('')}</div>` : ''}
-    ${showExplain && turn.vocabulary_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Giải thích từ vựng: ${escapeHtml(JSON.stringify(turn.vocabulary_explanations))}</div>` : ''}
-    ${showExplain && turn.grammar_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Giải thích ngữ pháp: ${escapeHtml(JSON.stringify(turn.grammar_explanations))}</div>` : ''}
+    ${showExplain && turn.vocabulary_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Từ vựng: ${convoFmtExplain(turn.vocabulary_explanations, 'v')}</div>` : ''}
+    ${showExplain && turn.grammar_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Ngữ pháp: ${convoFmtExplain(turn.grammar_explanations, 'g')}</div>` : ''}
   </div>`;
 }
 
@@ -276,6 +280,7 @@ function setConvoFilter(type, value) {
   const el = document.getElementById('content');
   if (el) el.innerHTML = renderConvoList(); // vẽ lại khung để nút đang chọn đổi màu
   loadConvoList();
+  loadConvoAdmin();
 }
 
 function updateSearchQuery(query) {
@@ -404,6 +409,117 @@ function convoSetRate(value) {
   if (el && typeof ttsRate === 'number') el.textContent = `${ttsRate.toFixed(2)}x`;
 }
 
+
+// ── V152: QUẢN TRỊ — sinh lượt thoại bằng AI, duyệt bài (chỉ quản trị viên thấy) ─────────────────
+// Luồng: chờ sinh → AI soạn + máy kiểm tra → NHÁP → admin xem & bấm Duyệt → người học mới thấy.
+let convoGenBusy = false;
+const convoSafeId = (id) => String(id == null ? '' : id).replace(/[^A-Za-z0-9_-]/g, '');
+const convoIsAdmin = () => typeof isAdminRole === 'function' && isAdminRole();
+const CONVO_STATUS_LABEL = { pending: '⏳ Chờ sinh', generating: '⚙️ Đang sinh', draft: '📝 Nháp (chờ duyệt)', ready: '✅ Đã duyệt', failed: '⚠️ Lỗi' };
+
+// Hiển thị mảng giải thích {hz,py,vi} / {pattern,note_vi}; dữ liệu cũ dạng khác thì in nguyên văn đã escape
+function convoFmtExplain(v, kind) {
+  if (!Array.isArray(v)) return escapeHtml(typeof v === 'string' ? v : JSON.stringify(v));
+  return v.map((x) => {
+    if (typeof x === 'string') return escapeHtml(x);
+    if (!x || typeof x !== 'object') return '';
+    if (kind === 'v') return escapeHtml(x.hz || '') + (x.py ? ' (' + escapeHtml(x.py) + ')' : '') + (x.vi ? ': ' + escapeHtml(x.vi) : '');
+    return escapeHtml(x.pattern || '') + (x.note_vi ? ' — ' + escapeHtml(x.note_vi) : '');
+  }).filter(Boolean).join(' · ');
+}
+
+function convoAdminBar(convo) {
+  if (!convoIsAdmin() || !convo) return '';
+  const st = convo.gen_status || 'ready';
+  const id = convoSafeId(convo.dialogue_id);
+  const btn = (label, onclick, primary) => `<button class="btn btn-sm${primary ? ' btn-primary' : ''}" onclick="${onclick}">${label}</button>`;
+  const hasTurns = (convo.turns || []).length > 0;
+  const actions = [];
+  if (st === 'draft') actions.push(btn('✅ Duyệt (người học sẽ thấy)', `convoSetApproval('${id}','ready')`, true));
+  if (st === 'ready') actions.push(btn('↩️ Gỡ duyệt', `convoSetApproval('${id}','draft')`));
+  if (st === 'pending' || st === 'failed' || !hasTurns) actions.push(btn('✨ Sinh bằng AI', `convoGenerate(1,['${id}'],false)`, true));
+  else actions.push(btn('🔄 Sinh lại', `convoRegenerate('${id}')`));
+  const err = (st === 'failed' && convo.gen_error) ? `<div style="font-size:.75rem;color:#c0392b;margin-top:4px">${escapeHtml(String(convo.gen_error).slice(0, 300))}</div>` : '';
+  return `<div style="border:1px dashed rgba(128,128,128,.5);border-radius:10px;padding:8px;margin-bottom:10px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><strong>🛠 Quản trị</strong><span>${CONVO_STATUS_LABEL[st] || escapeHtml(st)}</span>${actions.join('')}</div>
+    ${err}<div id="convo-gen-msg" style="font-size:.8rem;margin-top:4px"></div></div>`;
+}
+
+async function loadConvoAdmin() {
+  const box = document.getElementById('convo-admin');
+  if (!box || !convoIsAdmin()) return;
+  const r = await convoRequest('GET', '/admin/conversations');
+  const live = document.getElementById('convo-admin');
+  if (!live) return; // đã chuyển tab
+  if (!r.ok || !r.counts) { live.innerHTML = ''; return; }
+  const c = r.counts, items = r.items || [];
+  const drafts = items.filter((x) => x.gen_status === 'draft');
+  const failed = items.filter((x) => x.gen_status === 'failed').slice(0, 5);
+  const row = (x, extra) => `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0">
+      <span style="flex:1;min-width:140px">${escapeHtml(x.title_zh)} <small style="opacity:.7">${escapeHtml(x.title_vi)}</small></span>${extra}</div>`;
+  live.innerHTML = `<details class="panel" style="margin-bottom:10px"${(c.draft || c.failed) ? ' open' : ''}>
+    <summary style="cursor:pointer"><strong>🛠 Quản trị hội thoại</strong> — ⏳ ${c.pending | 0} chờ · 📝 ${c.draft | 0} nháp · ✅ ${c.ready | 0} đã duyệt · ⚠️ ${c.failed | 0} lỗi</summary>
+    <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="convoGenerate(1)">✨ Sinh 1 bài tiếp theo</button>
+      <button class="btn btn-sm" onclick="convoGenerate(3)">✨ Sinh 3 bài</button>
+    </div>
+    <div id="convo-gen-msg" style="font-size:.8rem;margin-top:6px;min-height:1em"></div>
+    ${drafts.length ? '<div style="margin-top:8px"><strong>Bản nháp chờ duyệt</strong>' + drafts.map((x) => row(x,
+      `<span style="opacity:.7">${Number(x.total_turns) || 0} lượt</span>
+       <button class="btn btn-sm" onclick="loadConvoDetail('${convoSafeId(x.dialogue_id)}')">👁 Xem</button>
+       <button class="btn btn-sm btn-primary" onclick="convoSetApproval('${convoSafeId(x.dialogue_id)}','ready')">✅ Duyệt</button>`)).join('') + '</div>' : ''}
+    ${failed.length ? '<div style="margin-top:8px"><strong>Lỗi gần đây</strong>' + failed.map((x) => row(x,
+      `<span style="font-size:.72rem;color:#c0392b;max-width:48vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(x.gen_error || '')}">${escapeHtml(String(x.gen_error || '').slice(0, 80))}</span>
+       <button class="btn btn-sm" onclick="convoGenerate(1,['${convoSafeId(x.dialogue_id)}'],false)">Thử lại</button>`)).join('') + '</div>' : ''}
+  </details>`;
+}
+
+function convoGenMsg(text) {
+  const el = document.getElementById('convo-gen-msg');
+  if (el) el.textContent = text || '';
+}
+
+function convoSummarize(results, quota) {
+  const lines = (results || []).map((x) => {
+    if (x.status === 'draft') return `✅ ${x.dialogueId}: nháp ${x.turns} lượt${x.attempts > 1 ? ` (sau ${x.attempts} lần thử)` : ''}`;
+    if (x.status === 'failed') return `⚠️ ${x.dialogueId}: ${(x.errors && x.errors[0]) || 'lỗi'}`;
+    if (x.status === 'skipped_ready') return `↷ ${x.dialogueId}: đã duyệt, bỏ qua (dùng "Sinh lại" để ghi đè)`;
+    if (x.status === 'skipped') return `↷ ${x.dialogueId}: để lượt sau (hết thời gian)`;
+    return `${x.dialogueId}: ${x.status}`;
+  });
+  if (quota) lines.push('⛔ Hết hạn mức AI — thử lại sau');
+  return lines.join(' · ') || 'Không có bài nào cần sinh.';
+}
+
+async function convoGenerate(count, dialogueIds, force) {
+  if (convoGenBusy) return;
+  convoGenBusy = true;
+  convoGenMsg('⏳ AI đang soạn hội thoại… (mỗi bài khoảng 1 phút, vui lòng giữ trang mở)');
+  const body = { count: count || 1, force: !!force };
+  if (Array.isArray(dialogueIds) && dialogueIds.length) body.dialogueIds = dialogueIds;
+  const r = await convoRequest('POST', '/admin/conversations/generate', body);
+  convoGenBusy = false;
+  if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không sinh được')); return; }
+  const summary = convoSummarize(r.results, r.quota);
+  if (document.getElementById('convo-admin')) { await loadConvoAdmin(); convoGenMsg(summary); }
+  else if (currentConvo && dialogueIds && dialogueIds[0]) { await loadConvoDetail(dialogueIds[0]); convoGenMsg(summary); }
+  else convoGenMsg(summary);
+}
+
+function convoRegenerate(dialogueId) {
+  if (!confirm('Sinh lại sẽ GHI ĐÈ các lượt thoại hiện có và đưa bài về trạng thái nháp. Tiếp tục?')) return;
+  convoGenerate(1, [convoSafeId(dialogueId)], true);
+}
+
+async function convoSetApproval(dialogueId, status) {
+  const id = convoSafeId(dialogueId);
+  const r = await convoRequest('POST', '/admin/conversations/' + encodeURIComponent(id) + '/status', { status });
+  if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không đổi được trạng thái')); convoStatus('⚠️ ' + (r.error || 'Không đổi được trạng thái')); return; }
+  if (document.getElementById('convo-admin')) await loadConvoAdmin();
+  else await loadConvoDetail(id);
+  convoGenMsg(status === 'ready' ? '✅ Đã duyệt — người học thấy bài này.' : '↩️ Đã gỡ duyệt — bài về trạng thái nháp.');
+}
+
 // ── Điểm vào (được js/navigation.js gọi khi mở tab "Hội thoại") ──
 function renderConvo() {
   return renderConvoList();
@@ -411,6 +527,7 @@ function renderConvo() {
 
 function bindConvo() {
   loadConvoList();
+  loadConvoAdmin(); // V152: bảng quản trị (chỉ admin)
 }
 
 function initConvo() {
@@ -423,6 +540,10 @@ if (typeof module !== 'undefined' && module.exports) module.exports = {
   initConvo,
   loadConvoList,
   loadConvoDetail,
+  loadConvoAdmin,
+  convoGenerate,
+  convoSetApproval,
+  convoFmtExplain,
   convoPlayTurn,
   convoPlayAll,
   toggleFavorite,
