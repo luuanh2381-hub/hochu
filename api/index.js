@@ -24,8 +24,10 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   toggleConversationFavorite, getConversationStats,
   pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
   countConversationsGeneratedToday, approveAllConversationDrafts, updateConversationTurn, getVocabStatusByHz, addConversationVocabToLesson, // V153
+  getConversationSchemaStatus, getConversationDataReport, // V154
 } = require('../lib/db');
 const conversationGen = require('../lib/conversation-gen'); // V152
+const { schemaErrorResponse } = require('../lib/conversation-schema'); // V154: lỗi lược đồ hội thoại có phân loại
 const { getFsrsVerificationInfo } = require('../lib/fsrs');
 // V69: mọi review + toàn bộ analytics/optimizer/personal-retention giờ đi qua lib/fsrs/ (scheduler
 // layer chuẩn hóa) — api/index.js KHÔNG còn gọi thẳng db.reviewFsrsCard nữa (Phần 4 của audit).
@@ -3724,6 +3726,14 @@ app.get('/api/cron/generate-daily', async (req, res) => {
 // ════════════════════════════════════════════════════
 // LƯU Ý THỨ TỰ: route tĩnh "/stats" PHẢI đứng trước "/:id", nếu không Express hiểu "stats" là một mã hội thoại.
 
+// V154: lỗi lược đồ hội thoại (thiếu bảng/cột/quyền, migration hỏng, mất kết nối Neon) → 503 + nguyên nhân CỤ THỂ + category cho admin.
+// Thông điệp đã lọc DATABASE_URL/mật khẩu trong lib/conversation-schema.js. Lỗi khác vẫn đi đường fail() (thông điệp chung).
+function convoFail(res, e) {
+  const r = schemaErrorResponse(e);
+  if (r) { console.error('⚠️  Lược đồ hội thoại:', e.category, e.detail); return res.status(r.status).json(r.body); }
+  return fail(res, e);
+}
+
 function convoNumericId(req, res) {
   const raw = String(req.params.id || '');
   if (!/^\d{1,9}$/.test(raw)) {
@@ -3744,7 +3754,7 @@ app.get('/api/conversations/stats', async (req, res) => {
   try {
     const stats = await getConversationStats();
     res.json({ ok: true, stats });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // ── Danh sách hội thoại theo bộ lọc (kèm tiến độ của người dùng, 1 truy vấn duy nhất) ──
@@ -3768,7 +3778,7 @@ app.get('/api/conversations', async (req, res) => {
     const withProgress = conversations.map(convo => ({ ...convo, progress: progressMap[convo.id] || null }));
 
     res.json({ ok: true, conversations: withProgress });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // ── Chi tiết 1 hội thoại + các lượt thoại (":id" ở đây là dialogue_id, ví dụ "hsk3-051") ──
@@ -3784,7 +3794,7 @@ app.get('/api/conversations/:id', async (req, res) => {
     }
     const progressMap = await getConversationProgressForUser(authed.username);
     res.json({ ok: true, conversation: { ...conversation, progress: progressMap[conversation.id] || null } });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // ── Cập nhật tiến độ học hội thoại (":id" ở đây là id số của bảng conversations) ──
@@ -3797,7 +3807,7 @@ app.post('/api/conversations/:id/progress', async (req, res) => {
     const body = req.body || {};
     await updateConversationProgress(authed.username, conversationId, convoNonNegInt(body.last_played_turn), convoNonNegInt(body.times_practiced));
     res.json({ ok: true });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // ── Đánh dấu hội thoại yêu thích ──
@@ -3811,7 +3821,7 @@ app.post('/api/conversations/:id/favorite', async (req, res) => {
     const isFavorited = body.is_favorited === undefined ? true : body.is_favorited === true || body.is_favorited === 'true';
     await toggleConversationFavorite(authed.username, conversationId, isFavorited);
     res.json({ ok: true });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 
@@ -3822,14 +3832,13 @@ app.get('/api/admin/conversations', async (req, res) => {
   if (!authed) return;
   if (!requireAdmin(authed.db.users[authed.username], res)) return;
   try {
-    res.json({ ok: true, ...(await getConversationGenOverview()) });
-  } catch (e) {
-    // Lỗi lược đồ (vd chưa tạo bảng conversations trong Neon / user DB thiếu quyền ALTER) → nói THẲNG cho admin, không "Lỗi server nội bộ"
-    if (/lược đồ hội thoại/.test(String(e && e.message))) {
-      return res.status(503).json({ ok: false, error: `${e.message}. Kiểm tra bảng conversations đã được tạo trong Neon (migrations/V145_conversation_library.sql) và user DB có quyền ALTER TABLE.` });
-    }
-    fail(res, e);
-  }
+    const overview = await getConversationGenOverview();
+    // V154: báo cáo dữ liệu — DB đang thiếu batch nào (không làm hỏng màn quản trị nếu bước này lỗi)
+    let dataReport = null;
+    try { dataReport = await getConversationDataReport(); } catch (e) { console.error('⚠️  dataReport hội thoại:', e && e.message); }
+    const st = getConversationSchemaStatus();
+    res.json({ ok: true, ...overview, dataReport, schema: { ok: st.ok, warnings: st.warnings || [], created: (st.applied && st.applied.createdTables) || [] } });
+  } catch (e) { convoFail(res, e); }
 });
 
 // V153: lõi sinh hội thoại DÙNG CHUNG cho route admin và cron. Tối đa 3 bài mỗi lượt (mỗi bài ~30-100 giây; hàm Vercel tối đa 300 giây).
@@ -3901,7 +3910,7 @@ app.post('/api/admin/conversations/generate', async (req, res) => {
     logActivity(authed.username, actingUser.role, 'conversation',
       `Sinh hội thoại bằng AI: ${drafted}/${out.results.length} bài thành bản nháp${out.quota ? ' — hết hạn mức AI' : ''}${out.limitReached ? ' — chạm hạn mức ngày' : ''}`);
     res.json({ ok: true, ...out });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // Duyệt tất cả bản nháp (chỉ bài có lượt thoại)
@@ -3914,7 +3923,7 @@ app.post('/api/admin/conversations/approve-all', async (req, res) => {
     const n = await approveAllConversationDrafts();
     logActivity(authed.username, actingUser.role, 'conversation', `Duyệt tất cả bản nháp hội thoại: ${n} bài`);
     res.json({ ok: true, approved: n });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // Sửa tay 1 lượt (chinese_text, pinyin, vietnamese_text) — kiểm tra bằng đúng luật như bản AI soạn
@@ -3932,7 +3941,7 @@ app.post('/api/admin/conversations/:dialogueId/turns/:n', async (req, res) => {
     if (!turn) return res.status(404).json({ ok: false, error: 'Không tìm thấy lượt thoại này' });
     logActivity(authed.username, actingUser.role, 'conversation', `Sửa tay lượt ${n} của hội thoại ${String(req.params.dialogueId).slice(0, 50)}`);
     res.json({ ok: true, turn });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // Thêm các từ MỚI của hội thoại vào kho từ vựng, bài số `lesson` (từ đó chảy vào FSRS theo cơ chế sẵn có). body: { lesson }
@@ -3948,7 +3957,7 @@ app.post('/api/admin/conversations/:dialogueId/add-vocab', async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (e) {
     if (/Số bài học/.test(String(e && e.message))) return res.status(400).json({ ok: false, error: e.message });
-    fail(res, e);
+    convoFail(res, e);
   }
 });
 
@@ -3959,7 +3968,7 @@ app.post('/api/conversations/vocab-status', async (req, res) => {
   try {
     const hzs = Array.isArray((req.body || {}).hzs) ? req.body.hzs.map((x) => String(x || '').trim()).filter((x) => x && x.length <= 20).slice(0, 100) : [];
     res.json({ ok: true, status: await getVocabStatusByHz(hzs) });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // Duyệt (ready) / gỡ duyệt (draft). body: { status }
@@ -3975,7 +3984,7 @@ app.post('/api/admin/conversations/:dialogueId/status', async (req, res) => {
     if (!row) return res.status(404).json({ ok: false, error: 'Không có bài này ở trạng thái nháp/đã duyệt (hoặc chưa có lượt thoại)' });
     logActivity(authed.username, actingUser.role, 'conversation', `${status === 'ready' ? 'Duyệt' : 'Gỡ duyệt'} hội thoại ${row.dialogue_id}`);
     res.json({ ok: true, dialogue_id: row.dialogue_id, gen_status: row.gen_status });
-  } catch (e) { fail(res, e); }
+  } catch (e) { convoFail(res, e); }
 });
 
 // ── Bắt lỗi chung ──
