@@ -115,9 +115,73 @@
       })(el);
     }
   }
+  // V151: NÚT TẠO ẢNH ngay trên thanh đầu của màn câu hỏi (chỉ quản trị viên, chỉ khi từ CHƯA có ảnh).
+  // Cố ý KHÔNG hiện ảnh ở màn câu hỏi (ảnh gợi nhớ có thể làm lộ đáp án) — vẽ xong, ảnh hiện ở màn đáp án như mọi thẻ khác.
+  var gen = new Map(); // hz → Promise đang vẽ (bấm lại / vẽ lại giao diện giữa chừng không gọi vẽ lần 2)
+  function generateImage(hz) {
+    if (gen.has(hz)) return gen.get(hz);
+    var p = g.fetch('/api/admin/word-images/generate', {
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ hz: [hz] })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || 'Lỗi tạo ảnh');
+      if (d.notConfigured) throw new Error('Thiếu cấu hình: ' + d.notConfigured.join(', '));
+      if (d.quota) throw new Error('Hết hạn mức Cloudflare hôm nay, thử lại sau 07:00 (giờ VN)');
+      cache.delete(hz);
+      return fetchImage(hz).then(function (data) {
+        if (data && data.status === 'ready') return data;
+        throw new Error((d.errorSamples && d.errorSamples[0]) || 'Chưa vẽ xong, bấm lại để thử tiếp');
+      });
+    }).then(function (data) { gen.delete(hz); return data; }, function (e) { gen.delete(hz); throw e; });
+    gen.set(hz, p);
+    return p;
+  }
+  function wiActionSlot(hz) {
+    return (HZ_RE.test(String(hz || '')) && isAdmin()) ? '<span class="wi-act" data-hz="' + esc(hz) + '"></span>' : '';
+  }
+  function renderAction(el, pending) {
+    var hz = el.getAttribute('data-hz');
+    el.innerHTML = '<button type="button" class="wi-hbtn" title="Tạo ảnh gợi nhớ cho từ này (ảnh hiện ở màn đáp án)"></button><span class="wi-hmsg"></span>';
+    var btn = el.querySelector('.wi-hbtn'), msg = el.querySelector('.wi-hmsg');
+    function busy() { btn.disabled = true; btn.textContent = '⏳ Đang vẽ…'; msg.textContent = ''; }
+    function idle() { btn.disabled = false; btn.textContent = pending ? '🖼️ Vẽ ảnh' : '🖼️ Tạo ảnh'; }
+    function track(promise) {
+      busy();
+      promise.then(function () {
+        btn.textContent = '✅ Đã tạo — xem ở màn đáp án';
+        el.className = 'wi-act wi-act-done';
+      }, function (e) {
+        idle(); btn.textContent = '🖼️ Thử lại';
+        var t = String(e && e.message || e); msg.textContent = t; msg.title = t;
+      });
+    }
+    idle();
+    if (gen.has(hz)) track(gen.get(hz)); // đang vẽ dở từ trước khi giao diện vẽ lại
+    btn.addEventListener('click', function (ev) { ev.stopPropagation(); track(generateImage(hz)); });
+  }
+  function wiMountAction(root) {
+    if (!g.document || typeof g.fetch !== 'function') return;
+    var logged = !!headers().Authorization;
+    var scope = root || g.document;
+    var slots = scope.querySelectorAll('.wi-act:not([data-wi])');
+    for (var i = 0; i < slots.length; i++) {
+      var el = slots[i];
+      el.setAttribute('data-wi', '1');
+      if (!logged || !isAdmin()) { el.remove(); continue; }
+      (function (slotEl) {
+        fetchImage(slotEl.getAttribute('data-hz')).then(function (data) {
+          if (!slotEl.isConnected) return;
+          if (data && data.status === 'ready') { slotEl.remove(); return; } // đã có ảnh → không cần nút
+          renderAction(slotEl, !!(data && data.status === 'pending'));
+        });
+      })(el);
+    }
+  }
   g.wiSlot = wiSlot;
+  g.wiActionSlot = wiActionSlot;
+  g.wiMountAction = wiMountAction;
   g.wiMount = wiMount;
   g.wiPrefetch = wiPrefetch;
   g.wiZoom = wiZoom;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { wiSlot: wiSlot, wiMount: wiMount, wiPrefetch: wiPrefetch, esc: esc };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { wiSlot: wiSlot, wiMount: wiMount, wiPrefetch: wiPrefetch, wiActionSlot: wiActionSlot, wiMountAction: wiMountAction, esc: esc };
 })(typeof window !== 'undefined' ? window : globalThis);

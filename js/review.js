@@ -1328,8 +1328,10 @@ function renderReview() {
   else if (practice || rvPhase === 'match') parts.push(ct('📝', 'luyện bổ sung · không tính vào lịch ôn', null));
   const counter = parts.join('');
   const headAct = (typeof swHeadActionsHtml === 'function') ? swHeadActionsHtml() : '';
+  // V151: nút tạo ảnh gợi nhớ (admin, từ chưa có ảnh) ngay trên thanh đầu — có ở cả màn câu hỏi; ảnh vẫn chỉ hiện ở màn đáp án.
+  const wiAct = (typeof wiActionSlot === 'function' && cur && cur.word) ? wiActionSlot(cur.word.hz) : '';
   return `
-    <div class="rv-card" data-phase="${rvPhase}" data-ans="${(rvPhase === 'intro' || rvPhase === 'match' || rvPhase === 'question') ? '' : '1'}" data-q="${rvPhase === 'match' ? 'match' : (rvQuestion ? rvQuestion.typeId : '')}" data-kind="${(rvPhase === 'question' && rvQuestion && rvQuestion.prompt) ? rvQuestion.prompt.kind : ''}"><div class="rv-head"><div class="rv-counter rv-counter-line" role="status" aria-live="polite">${counter}</div><div class="rv-head-act">${headAct}</div></div><div class="rv-body">${body}</div></div>
+    <div class="rv-card" data-phase="${rvPhase}" data-ans="${(rvPhase === 'intro' || rvPhase === 'match' || rvPhase === 'question') ? '' : '1'}" data-q="${rvPhase === 'match' ? 'match' : (rvQuestion ? rvQuestion.typeId : '')}" data-kind="${(rvPhase === 'question' && rvQuestion && rvQuestion.prompt) ? rvQuestion.prompt.kind : ''}"><div class="rv-head"><div class="rv-counter rv-counter-line" role="status" aria-live="polite">${counter}</div><div class="rv-head-act">${wiAct}${headAct}</div></div><div class="rv-body">${body}</div></div>
   `;
 }
 
@@ -1338,6 +1340,7 @@ function renderReview() {
 // server trả lời (server vẫn là nguồn sự thật cuối cùng, việc này chỉ để phản hồi UI tức thời).
 function bindReview() {
   if (rvStage === 'start' || !rvQueue.items.length) return;
+  if (typeof wiMountAction === 'function') wiMountAction(document.querySelector('.rv-head')); // V151: nút tạo ảnh (admin)
   if (typeof wiMount === 'function') wiMount(document.querySelector('.rv-body')); // V142: ảnh gợi nhớ (nếu đã có) — màn từ mới + màn đáp án
   // V143: tải trước ảnh của thẻ kế tiếp để mở thẻ sau là có ảnh ngay (không tải lại ảnh đã có trong cache).
   if (typeof wiPrefetch === 'function') { const nx = rvQueue.items[1]; if (nx && nx.word) wiPrefetch(nx.word.hz); }
