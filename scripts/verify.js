@@ -25,7 +25,7 @@ const AREAS = {
     syntax: [...glob('js/*.js')],
     tests: [
       'test/v110-ui.smoke.test.js', 'test/v132-tap-only.test.js', 'test/v133-duel-listen.test.js',
-      'test/v134-binary-tf.test.js', 'test/v135-sentence-order.test.js', 'test/v136-question-mix.test.js', 'test/v137-tone-recognition.test.js', 'test/v138-sentence.test.js', 'test/v150-exercise-tier.test.js', 'test/v151-image-button.test.js', 'test/v116-menu.test.js', 'test/v140-tts-natural.test.js', 'test/v142-word-images.test.js', 'test/v143-study-ux.test.js', 'test/v144-word-image-admin.test.js', 'test/v145-conversation.test.js', 'test/v146-session-size.test.js', 'test/v149-legacy-cap.test.js', 'test/v147-tts-latency.test.js',
+      'test/v134-binary-tf.test.js', 'test/v135-sentence-order.test.js', 'test/v136-question-mix.test.js', 'test/v137-tone-recognition.test.js', 'test/v138-sentence.test.js', 'test/v150-exercise-tier.test.js', 'test/v151-image-button.test.js', 'test/v152-conversation-gen.test.js', 'test/v116-menu.test.js', 'test/v140-tts-natural.test.js', 'test/v142-word-images.test.js', 'test/v143-study-ux.test.js', 'test/v144-word-image-admin.test.js', 'test/v145-conversation.test.js', 'test/v146-session-size.test.js', 'test/v149-legacy-cap.test.js', 'test/v147-tts-latency.test.js',
     ],
   },
   core: {
