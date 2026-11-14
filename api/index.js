@@ -23,6 +23,7 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   getConversations, getConversationWithTurns, getConversationProgressForUser, updateConversationProgress, // V145: thư viện hội thoại
   toggleConversationFavorite, getConversationStats,
   pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
+  countConversationsGeneratedToday, approveAllConversationDrafts, updateConversationTurn, getVocabStatusByHz, addConversationVocabToLesson, // V153
 } = require('../lib/db');
 const conversationGen = require('../lib/conversation-gen'); // V152
 const { getFsrsVerificationInfo } = require('../lib/fsrs');
@@ -3679,7 +3680,11 @@ app.get('/api/cron/generate-daily', async (req, res) => {
     let hanziResult = { batches: 0, done: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let wordResult = { batches: 0, wordsDone: 0, wordsRetried: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let imageResult = null;
-    if (task === 'images') {
+    let convoResult = null;
+    if (task === 'conversations') {
+      // V153: sinh hội thoại bằng AI theo lịch — 1 bài/lượt gọi, tôn trọng hạn mức ngày (CONVERSATION_GEN_DAILY_LIMIT). Chỉ ra bản NHÁP, admin vẫn phải duyệt.
+      convoResult = await runConversationGeneration({ count: 1, budgetMs: 250000, respectDailyLimit: true });
+    } else if (task === 'images') {
       // V142: ảnh gợi nhớ — chạy riêng, không chặn/không bị chặn bởi Hán Việt, chiết tự, ví dụ
       imageResult = await wordImagesService().runBatch(TOTAL_BUDGET_MS);
     } else if (task === 'examples') {
@@ -3705,8 +3710,9 @@ app.get('/api/cron/generate-daily', async (req, res) => {
     const errText = allErrSamples.length ? ` — Lỗi mẫu: ${allErrSamples.join(' | ')}` : '';
     logActivity(null, 'system', 'system',
       `[Tự động - cron] Hán Việt: ${hanvietResult.done} từ xong; Sinh ví dụ: ${wordResult.wordsDone} từ xong, ${wordResult.wordsRetried} cần thử lại; Chiết tự: ${hanziResult.done} chữ xong${errText}`);
+    if (convoResult) logActivity(null, 'system', 'system', `[Tự động - cron] Hội thoại AI: ${convoResult.results.filter((x) => x.status === 'draft').length} bài nháp mới${convoResult.quota ? ' — hết hạn mức AI' : ''}${convoResult.limitReached ? ' — chạm hạn mức ngày' : ''}`);
     if (imageResult) logActivity(null, 'system', 'system', `[Tự động - cron] Ảnh gợi nhớ: ${imageResult.drafted} từ soạn prompt, ${imageResult.generated} ảnh xong, ${imageResult.failed} lỗi${imageResult.quota ? ' (hết hạn mức Cloudflare)' : ''}`);
-    res.json({ ok: true, hanviet: hanvietResult, wordExamples: wordResult, hanziParts: hanziResult, wordImages: imageResult || undefined });
+    res.json({ ok: true, hanviet: hanvietResult, wordExamples: wordResult, hanziParts: hanziResult, wordImages: imageResult || undefined, conversations: convoResult || undefined });
   } catch (e) {
     console.error('⚠️  Lỗi:', e && e.message);
     res.status(500).json({ ok: false, error: publicErrorMessage(e) });
@@ -3817,10 +3823,68 @@ app.get('/api/admin/conversations', async (req, res) => {
   if (!requireAdmin(authed.db.users[authed.username], res)) return;
   try {
     res.json({ ok: true, ...(await getConversationGenOverview()) });
-  } catch (e) { fail(res, e); }
+  } catch (e) {
+    // Lỗi lược đồ (vd chưa tạo bảng conversations trong Neon / user DB thiếu quyền ALTER) → nói THẲNG cho admin, không "Lỗi server nội bộ"
+    if (/lược đồ hội thoại/.test(String(e && e.message))) {
+      return res.status(503).json({ ok: false, error: `${e.message}. Kiểm tra bảng conversations đã được tạo trong Neon (migrations/V145_conversation_library.sql) và user DB có quyền ALTER TABLE.` });
+    }
+    fail(res, e);
+  }
 });
 
-// Sinh cho tối đa 3 bài mỗi lượt gọi (mỗi bài ~30-100 giây; hàm Vercel tối đa 300 giây). body: { dialogueIds?: string[], count?: 1-3, targetTurns?: 12-34, force?: boolean }
+// V153: lõi sinh hội thoại DÙNG CHUNG cho route admin và cron. Tối đa 3 bài mỗi lượt (mỗi bài ~30-100 giây; hàm Vercel tối đa 300 giây).
+//  - ids: danh sách chỉ định (không giới hạn ngày); rỗng → tự chọn bài pending/failed (TÔN TRỌNG hạn mức ngày khi respectDailyLimit).
+//  - Hạn mức ngày: env CONVERSATION_GEN_DAILY_LIMIT (mặc định 20; <=0 = không giới hạn), đếm số bài soạn xong trong ngày giờ Việt Nam.
+async function runConversationGeneration({ ids, count, targetTurns, force, budgetMs, respectDailyLimit }) {
+  const startedAt = Date.now();
+  const BUDGET_MS = budgetMs || 240000, NEED_PER_ITEM_MS = 110000;
+  const limit = conversationGen.parseDailyLimit(process.env.CONVERSATION_GEN_DAILY_LIMIT);
+  let doneToday = 0, remaining = Infinity;
+  if (respectDailyLimit && limit > 0) {
+    doneToday = await countConversationsGeneratedToday();
+    remaining = conversationGen.dailyLimitRemaining(limit, doneToday);
+  }
+  let picked = Array.isArray(ids) ? ids.slice(0, 3) : [];
+  if (!picked.length) {
+    if (remaining <= 0) return { results: [], quota: false, limitReached: true, dailyLimit: limit, generatedToday: doneToday };
+    const want = Math.max(1, Math.min(3, parseInt(count, 10) || 1));
+    picked = await pickConversationsForGen(remaining === Infinity ? want : Math.min(want, remaining));
+  }
+  const target = conversationGen.clampTarget(targetTurns);
+  const results = [];
+  let quota = false, drafted = 0, limitReached = false;
+  for (const dialogueId of picked) {
+    if (quota || Date.now() - startedAt > BUDGET_MS - NEED_PER_ITEM_MS) { results.push({ dialogueId, status: 'skipped' }); continue; }
+    if (respectDailyLimit && drafted >= remaining) { limitReached = true; results.push({ dialogueId, status: 'skipped_limit' }); continue; }
+    const convo = await getConversationForGen(dialogueId);
+    if (!convo) { results.push({ dialogueId, status: 'not_found' }); continue; }
+    if (convo.gen_status === 'ready' && force !== true) { results.push({ dialogueId, status: 'skipped_ready' }); continue; }
+    await setConversationGenState(convo.id, 'generating', null);
+    try {
+      const r = await conversationGen.generateConversationTurns({
+        convo, targetTurns: target,
+        callModel: (prompt) => callGemini(prompt, { maxTokens: 8000, timeoutMs: 120000 }),
+      });
+      if (!r.ok) {
+        await setConversationGenState(convo.id, 'failed', r.errors.join(' | '));
+        results.push({ dialogueId, status: 'failed', errors: r.errors, attempts: r.attempts });
+        continue;
+      }
+      await saveGeneratedConversation(convo.id, r.turns, { model: AI_MODELS.join(','), promptVersion: r.promptVersion });
+      drafted++;
+      results.push({ dialogueId, status: 'draft', turns: r.turns.length, attempts: r.attempts, warnings: r.warnings });
+    } catch (e) {
+      const msg = cleanErrorMsg(e && e.message);
+      await setConversationGenState(convo.id, 'failed', msg).catch(() => {});
+      results.push({ dialogueId, status: 'failed', errors: [msg] });
+      if (isQuotaGeminiError(e && e.message)) quota = true;
+    }
+  }
+  if (respectDailyLimit && limit > 0 && doneToday + drafted >= limit) limitReached = true;
+  return { results, quota, limitReached, dailyLimit: limit, generatedToday: doneToday + drafted };
+}
+
+// body: { dialogueIds?: string[], count?: 1-3, targetTurns?: 12-34, force?: boolean }
 app.post('/api/admin/conversations/generate', async (req, res) => {
   const authed = await requireAuth(req, res);
   if (!authed) return;
@@ -3828,42 +3892,73 @@ app.post('/api/admin/conversations/generate', async (req, res) => {
   if (!requireAdmin(actingUser, res)) return;
   try {
     const body = req.body || {};
-    const startedAt = Date.now();
-    const BUDGET_MS = 240000, NEED_PER_ITEM_MS = 110000;
-    const targetTurns = conversationGen.clampTarget(body.targetTurns);
-    let ids = Array.isArray(body.dialogueIds) ? body.dialogueIds.map(String).filter((x) => /^[A-Za-z0-9_-]{1,50}$/.test(x)).slice(0, 3) : [];
-    if (!ids.length) ids = await pickConversationsForGen(Math.max(1, Math.min(3, parseInt(body.count, 10) || 1)));
-    const results = [];
-    let quota = false;
-    for (const dialogueId of ids) {
-      if (quota || Date.now() - startedAt > BUDGET_MS - NEED_PER_ITEM_MS) { results.push({ dialogueId, status: 'skipped' }); continue; }
-      const convo = await getConversationForGen(dialogueId);
-      if (!convo) { results.push({ dialogueId, status: 'not_found' }); continue; }
-      if (convo.gen_status === 'ready' && body.force !== true) { results.push({ dialogueId, status: 'skipped_ready' }); continue; }
-      await setConversationGenState(convo.id, 'generating', null);
-      try {
-        const r = await conversationGen.generateConversationTurns({
-          convo, targetTurns,
-          callModel: (prompt) => callGemini(prompt, { maxTokens: 8000, timeoutMs: 120000 }),
-        });
-        if (!r.ok) {
-          await setConversationGenState(convo.id, 'failed', r.errors.join(' | '));
-          results.push({ dialogueId, status: 'failed', errors: r.errors, attempts: r.attempts });
-          continue;
-        }
-        await saveGeneratedConversation(convo.id, r.turns, { model: AI_MODELS.join(','), promptVersion: r.promptVersion });
-        results.push({ dialogueId, status: 'draft', turns: r.turns.length, attempts: r.attempts, warnings: r.warnings });
-      } catch (e) {
-        const msg = cleanErrorMsg(e && e.message);
-        await setConversationGenState(convo.id, 'failed', msg).catch(() => {});
-        results.push({ dialogueId, status: 'failed', errors: [msg] });
-        if (isQuotaGeminiError(e && e.message)) quota = true;
-      }
-    }
-    const drafted = results.filter((x) => x.status === 'draft').length;
+    const ids = Array.isArray(body.dialogueIds) ? body.dialogueIds.map(String).filter((x) => /^[A-Za-z0-9_-]{1,50}$/.test(x)).slice(0, 3) : [];
+    const out = await runConversationGeneration({
+      ids, count: body.count, targetTurns: body.targetTurns, force: body.force === true,
+      respectDailyLimit: ids.length === 0, // chỉ định bài cụ thể = admin chủ động → không bị hạn mức ngày chặn
+    });
+    const drafted = out.results.filter((x) => x.status === 'draft').length;
     logActivity(authed.username, actingUser.role, 'conversation',
-      `Sinh hội thoại bằng AI: ${drafted}/${ids.length} bài thành bản nháp${quota ? ' — hết hạn mức AI' : ''}`);
-    res.json({ ok: true, results, quota });
+      `Sinh hội thoại bằng AI: ${drafted}/${out.results.length} bài thành bản nháp${out.quota ? ' — hết hạn mức AI' : ''}${out.limitReached ? ' — chạm hạn mức ngày' : ''}`);
+    res.json({ ok: true, ...out });
+  } catch (e) { fail(res, e); }
+});
+
+// Duyệt tất cả bản nháp (chỉ bài có lượt thoại)
+app.post('/api/admin/conversations/approve-all', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const n = await approveAllConversationDrafts();
+    logActivity(authed.username, actingUser.role, 'conversation', `Duyệt tất cả bản nháp hội thoại: ${n} bài`);
+    res.json({ ok: true, approved: n });
+  } catch (e) { fail(res, e); }
+});
+
+// Sửa tay 1 lượt (chinese_text, pinyin, vietnamese_text) — kiểm tra bằng đúng luật như bản AI soạn
+app.post('/api/admin/conversations/:dialogueId/turns/:n', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const n = parseInt(req.params.n, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 60) return res.status(400).json({ ok: false, error: 'Số lượt không hợp lệ' });
+    const v = conversationGen.validateTurnEdit(req.body || {});
+    if (!v.ok) return res.status(400).json({ ok: false, error: v.errors.join('; '), errors: v.errors });
+    const turn = await updateConversationTurn(String(req.params.dialogueId), n, v.turn);
+    if (!turn) return res.status(404).json({ ok: false, error: 'Không tìm thấy lượt thoại này' });
+    logActivity(authed.username, actingUser.role, 'conversation', `Sửa tay lượt ${n} của hội thoại ${String(req.params.dialogueId).slice(0, 50)}`);
+    res.json({ ok: true, turn });
+  } catch (e) { fail(res, e); }
+});
+
+// Thêm các từ MỚI của hội thoại vào kho từ vựng, bài số `lesson` (từ đó chảy vào FSRS theo cơ chế sẵn có). body: { lesson }
+app.post('/api/admin/conversations/:dialogueId/add-vocab', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const out = await addConversationVocabToLesson(String(req.params.dialogueId), (req.body || {}).lesson);
+    logActivity(authed.username, actingUser.role, 'conversation',
+      `Thêm từ hội thoại ${String(req.params.dialogueId).slice(0, 50)} vào bài ${parseInt((req.body || {}).lesson, 10)}: thêm mới ${out.added}, đã có ${out.existing}`);
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    if (/Số bài học/.test(String(e && e.message))) return res.status(400).json({ ok: false, error: e.message });
+    fail(res, e);
+  }
+});
+
+// Mọi người dùng đã đăng nhập: từ nào trong danh sách đã có trong kho từ (và thuộc bài nào). body: { hzs: string[] (≤100) }
+app.post('/api/conversations/vocab-status', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const hzs = Array.isArray((req.body || {}).hzs) ? req.body.hzs.map((x) => String(x || '').trim()).filter((x) => x && x.length <= 20).slice(0, 100) : [];
+    res.json({ ok: true, status: await getVocabStatusByHz(hzs) });
   } catch (e) { fail(res, e); }
 });
 
