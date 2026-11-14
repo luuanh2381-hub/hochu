@@ -236,8 +236,16 @@ function rvBuildQuestionFor(item) {
   if (item.type === 'tone') { // V137: nhận biết thanh điệu — chỉ dựng dạng này (luyện bổ sung, không đổi lịch ôn)
     return QS.choose(w, ctx, Object.assign({}, base, { allowPracticeOnly: true, only: ['hz2tone'], forced: true }));
   }
-  if (item.type === 'check') return QS.choose(w, ctx, Object.assign({}, base, { only: QE.SENTENCE_ORDER }));
-  if (item.type === 'drill') return QS.choose(w, ctx, Object.assign({}, base, { only: QE.SENTENCE_ORDER }));
+  // V150: thẻ chính thức / kiểm tra / drill — ưu tiên câu hỏi theo câu; TỪ CHƯA CÓ CÂU VÍ DỤ → rơi về dạng từ đơn lẻ có nhãn FSRS
+  // (QE.WORD_FALLBACK_ORDER) thay vì bị bỏ khỏi buổi. Dạng gõ vẫn qua cổng cứng của bộ chọn (chỉ khi kỹ năng đã vững + bật gõ).
+  const officialQ = () => {
+    const q = QS.choose(w, ctx, Object.assign({}, base, { fsrsOnly: true, only: QE.SENTENCE_ORDER }));
+    if (q) return q;
+    const fb = QE.WORD_FALLBACK_ORDER || [];
+    return fb.length ? QS.choose(w, ctx, Object.assign({}, base, { fsrsOnly: true, only: fb })) : null;
+  };
+  if (item.type === 'check') return officialQ();
+  if (item.type === 'drill') return officialQ();
   if (item.type === 'extra' || item.type === 'redo') {
     // V138: câu luyện thêm cũng hỏi THEO CÂU (không còn trắc nghiệm từ đơn lẻ). Không dựng được câu nào → null
     // (thẻ bị bỏ khỏi buổi này, KHÔNG rơi về dạng hỏi nghĩa của một từ).
@@ -254,7 +262,7 @@ function rvBuildQuestionFor(item) {
   }
   // V138: thẻ FSRS chính thức — CHỈ hỏi bằng câu hỏi theo câu (server tự tra lại câu thật để chấm). Không dựng
   // được câu nào (từ chưa có câu ví dụ) → null; rvPrepareCurrentCard bỏ thẻ khỏi buổi này thay vì hỏi từ đơn lẻ.
-  return QS.choose(w, ctx, Object.assign({}, base, { fsrsOnly: true, only: QE.SENTENCE_ORDER }));
+  return officialQ();
 }
 function rvStageLabel(item) {
   if (!item) return '';

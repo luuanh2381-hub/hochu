@@ -1,8 +1,17 @@
 # HANDOFF — trạng thái dự án
 
-Cập nhật lần cuối: 2026-11-10 · Commit: xem `git log -1`
+Cập nhật lần cuối: 2026-11-14 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V150 — Thêm dạng bài cho "Hôm nay học" cùng FSRS (2026-11-14, chưa deploy, chưa chạy Postgres/trình duyệt thật)
+(1) **Từ chưa có câu ví dụ không còn bị bỏ khỏi buổi:** `rvBuildQuestionFor` (thẻ chính thức, `check`, `drill`) thử `QE.SENTENCE_ORDER` trước; không dựng được thì rơi về `QE.WORD_FALLBACK_ORDER`
+(`hz2vi, vi2hz, listen2vi, listen2hz, hz2py, typeVi2hz, typeHz2py` — đều có nhãn `review-*` fsrs:true trên server). Dạng gõ vẫn qua cổng cứng của `QS.rank` (kỹ năng đủ vững + bật gõ). Từ CÓ câu vẫn hỏi theo câu như V138.
+(2) **Rating theo BẬC dạng bài** (`lib/fsrs-auto-rating.js`: `EXERCISE_TIER`, `exerciseTier`): bậc 1 = nhận diện từ đơn lẻ (`review-hz2vi`, `quiz-hz2vi`, `review-listen-vi`) → đúng tối đa **Good** (không Easy);
+bậc 3 = tự gõ; bậc 2 = mặc định (gồm mọi dạng câu, nhãn lạ/thiếu) → y hệt trước V150. Sai luôn Again; thẻ mới vẫn không Easy; user override vẫn thắng. Baseline thời gian ưu tiên lượt CÙNG bậc (≥3 mẫu), thiếu thì dùng toàn bộ như cũ.
+Preview (`/api/study/review/preview` → `previewRating`) và commit (`reviewFsrsCard`) cùng nhận `exerciseType` (nhãn đã qua `resolveExercise`). Truy vấn lịch sử lấy `exercise_type` bằng `to_jsonb(review_history) ->> 'exercise_type'` để thiếu cột cũng không làm hỏng transaction.
+Test: `npm run test:v150` (11 test, cần `ts-fsrs`). Đã sửa 1 test cũ `adaptive-session` (khẳng định "thiếu câu → bỏ thẻ" của V138).
+**Chưa làm / chưa kiểm chứng:** nâng sắp xếp câu (`orderSentence`) lên FSRS (bước 3); dạng mới cần dữ liệu (bước 4); optimizer cá nhân chưa được đọc kỹ khi log trộn nhiều dạng; cần thử trên trình duyệt thật cho từ không có câu.
+
 ## V149 — Sửa "hệ thống không trả thẻ ôn tập" (2026-11-13)
 Lỗi: dashboard báo "Cần ôn 100 · Từ mới 20" nhưng bấm "Bắt đầu học" ra "0 Từ mới · 0 Thẻ đến hạn ôn · 1 Từ cần luyện thêm" (server vẫn trả đủ thẻ — thẻ bị loại ở CLIENT).
 Nguyên nhân gốc: khoá localStorage cũ `rvSessionCards` trước V138 nghĩa "0 = không giới hạn" (mặc định); V138 đổi 0 thành "TẮT thẻ chính thức" và V146 giữ nguyên '0' cũ khi chuyển sang `rvSessionCardsV2`

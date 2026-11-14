@@ -835,6 +835,7 @@ app.post('/api/study/review/preview', async (req, res) => {
     }
     const systemRating = await reviewService.previewRating({
       userId: authed.username, hz, l, answerCorrect, responseTimeMs: rt, answerChanges: changes,
+      exerciseType: exPrev ? exPrev.exerciseType : null, // V150: bậc dạng bài (nhãn đã được server xác thực qua resolveExercise)
     });
     res.json({ ok: true, answerCorrect, verdict: graded.verdict, correctAnswer, systemRating });
   } catch (e) { fail(res, e); }

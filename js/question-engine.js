@@ -96,6 +96,9 @@ const QE = (function () {
   // dạng nào không dựng được (từ chưa có câu ví dụ) thì bộ chọn thử dạng kế tiếp, hết thì trả null (KHÔNG rơi về
   // trắc nghiệm từ đơn lẻ). `cloze` cũng là câu hỏi theo câu nên nằm trong danh sách này.
   const SENTENCE_ORDER = ['sent2vi', 'vi2sent', 'listenSent2vi', 'cloze', 'sentPick'];
+  // V150: dạng TỪ ĐƠN LẺ có nhãn FSRS chính thức — chỉ dùng làm dự phòng khi từ chưa có câu ví dụ (không dựng được SENTENCE_ORDER).
+  // Thứ tự = ưu tiên khi hoà điểm. 'cloze' không nằm ở đây (cần câu). Dạng gõ vẫn bị cổng cứng của QS.rank chặn nếu chưa đủ vững.
+  const WORD_FALLBACK_ORDER = ['hz2vi', 'vi2hz', 'listen2vi', 'listen2hz', 'hz2py', 'typeVi2hz', 'typeHz2py'];
 
   // ── Chuẩn hoá ──────────────────────────────────────────────────────────────────────────────
   function normText(s) {
@@ -913,7 +916,7 @@ const QE = (function () {
     };
   }
 
-  return { TYPES, MCQ_ORDER, PRACTICE_ORDER, PRACTICE_TYPED_ORDER, HV_ORDER, DUEL_ORDER, TF_ORDER, TYPED_ORDER, ORDER_ORDER, SENTENCE_ORDER, build, validate, buildMatch, findDuelDonor, toneSequence, toneVariants, normText, meaningSet, meaningsOverlap, pyKey, findSentences, placeCorrect };
+  return { TYPES, MCQ_ORDER, PRACTICE_ORDER, PRACTICE_TYPED_ORDER, HV_ORDER, DUEL_ORDER, TF_ORDER, TYPED_ORDER, ORDER_ORDER, SENTENCE_ORDER, WORD_FALLBACK_ORDER, build, validate, buildMatch, findDuelDonor, toneSequence, toneVariants, normText, meaningSet, meaningsOverlap, pyKey, findSentences, placeCorrect };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = QE;

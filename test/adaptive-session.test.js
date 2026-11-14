@@ -386,7 +386,11 @@ test('Không có âm thanh → không có câu nghe; không có câu ví dụ �
   assert.ok(r.finished); assert.ok(!r.types.includes('listenSent2vi'));
   const E2 = makeEnv(); E2.env.pool = []; E2.ctx.SENTENCES = [];
   const r2 = simulate(E2, items, () => true);
-  assert.ok(r2.finished && r2.officialAnswers === 0, 'thiếu câu thật → bỏ thẻ, không hỏi từ đơn lẻ');
+  // V150: thiếu câu thật → KHÔNG còn bỏ thẻ; hỏi dạng từ đơn lẻ có nhãn FSRS (QE.WORD_FALLBACK_ORDER). Tuyệt đối không có dạng câu.
+  assert.ok(r2.finished && r2.officialAnswers > 0, 'thiếu câu thật → thẻ chính thức vẫn được hỏi bằng dạng từ đơn lẻ');
+  const QEm = require('../js/question-engine.js');
+  assert.ok(r2.types.length > 0 && r2.types.every(t => QEm.WORD_FALLBACK_ORDER.includes(t)), 'chỉ dạng dự phòng: ' + r2.types.join(','));
+  assert.ok(!r2.types.some(t => QEm.SENTENCE_ORDER.includes(t) && t !== 'cloze'), 'không dựng dạng câu khi không có câu');
 });
 test('Từ yếu nghe (có âm thanh) → buổi có câu nghe CẢ CÂU cho đúng từ đó [case 5]', () => {
   const E = makeEnv();
