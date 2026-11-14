@@ -3,6 +3,12 @@
 Cập nhật lần cuối: 2026-11-14 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V151 — Nút "🖼️ Tạo ảnh" ngay trên màn câu hỏi (2026-11-14, chưa thử trên trình duyệt thật)
+Thanh đầu thẻ (`.rv-head-act`) có nút tạo ảnh gợi nhớ cho từ đang học — CHỈ quản trị viên, CHỈ khi từ chưa có ảnh (đã `ready` thì ô tự biến mất). Gọi `POST /api/admin/word-images/generate` {hz:[hz]} (≤~50 giây),
+bấm đúp không vẽ 2 lần (`gen` Map trong `js/word-image.js`), lỗi hiện lý do + "Thử lại". Cố ý KHÔNG hiện ảnh ở màn câu hỏi (ảnh có thể lộ đáp án): vẽ xong, ảnh hiện ở màn đáp án như cũ (cache đã xoá).
+Code: `wiActionSlot` / `wiMountAction` (`js/word-image.js`), gắn ở `rvRender` + `bindReview` (`js/review.js`), CSS `.wi-act/.wi-hbtn/.wi-hmsg` trong khối V142. Test: `npm run test:v151` (7 test, chạy THẬT word-image.js trong vm với DOM giả).
+**Lưu ý:** ảnh chỉ hiện nếu CORS bucket R2 có origin của app (site bật COEP require-corp) — xem V142.
+
 ## V150 — Thêm dạng bài cho "Hôm nay học" cùng FSRS (2026-11-14, chưa deploy, chưa chạy Postgres/trình duyệt thật)
 (1) **Từ chưa có câu ví dụ không còn bị bỏ khỏi buổi:** `rvBuildQuestionFor` (thẻ chính thức, `check`, `drill`) thử `QE.SENTENCE_ORDER` trước; không dựng được thì rơi về `QE.WORD_FALLBACK_ORDER`
 (`hz2vi, vi2hz, listen2vi, listen2hz, hz2py, typeVi2hz, typeHz2py` — đều có nhãn `review-*` fsrs:true trên server). Dạng gõ vẫn qua cổng cứng của `QS.rank` (kỹ năng đủ vững + bật gõ). Từ CÓ câu vẫn hỏi theo câu như V138.
