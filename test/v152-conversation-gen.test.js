@@ -154,7 +154,7 @@ test('api/index.js: route quản trị bắt buộc admin, tối đa 3 bài/lư�
     assert.ok(/requireAdmin\(/.test(api.slice(i, i + 500)), route + ' phải kiểm tra admin');
   }
   assert.ok(/\.slice\(0, 3\)/.test(api.slice(api.indexOf("app.post('/api/admin/conversations/generate'"), api.indexOf("app.post('/api/admin/conversations/generate'") + 1200)));
-  assert.ok(/convo\.gen_status === 'ready' && body\.force !== true/.test(api));
+  assert.ok(/convo\.gen_status === 'ready' && force !== true/.test(api));
   assert.ok(/\(opts && opts\.maxTokens\) \|\| 4096/.test(api) && /\(opts && opts\.timeoutMs\) \|\| 25000/.test(api), 'mặc định cũ 4096 token / 25 giây');
   assert.ok(/convoIsAdmin && req\.query\.all === '1'/.test(api) && /includeUnready: convoIsAdmin/.test(api));
   assert.ok(/status !== 'ready' && status !== 'draft'/.test(api));
