@@ -226,7 +226,7 @@ function renderConvoTurn(convo, turn, index) {
   if (showPinyin) info.push(`<div style="font-size:.85rem;opacity:.75">Pinyin: ${escapeHtml(turn.pinyin)}</div>`);
   if (showVi) info.push(`<div style="font-size:.85rem;opacity:.75">Tiếng Việt: ${escapeHtml(turn.vietnamese_text)}</div>`);
 
-  return `<div style="border:1px solid rgba(128,128,128,.3);border-radius:12px;padding:10px;margin:8px 0;${isCompleted ? 'background:rgba(34,197,94,.12);' : ''}">
+  return `<div id="convo-turn-${index}" style="border:1px solid rgba(128,128,128,.3);border-radius:12px;padding:10px;margin:8px 0;${isCompleted ? 'background:rgba(34,197,94,.12);' : ''}">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-weight:700;color:var(--active-dark,#3730a3)">${escapeHtml(turn.character)}</span>
       <span style="font-size:1.25rem">${escapeHtml(turn.chinese_text)}</span>
@@ -235,9 +235,10 @@ function renderConvoTurn(convo, turn, index) {
         <option value="zh-CN-XiaoxiaoNeural"${v === 'zh-CN-XiaoxiaoNeural' ? ' selected' : ''}>Nữ · Xiaoxiao</option>
         <option value="zh-CN-YunxiNeural"${v === 'zh-CN-YunxiNeural' ? ' selected' : ''}>Nam · Yunxi</option>
       </select>
+      ${convoIsAdmin() ? `<button class="btn btn-sm" title="Sửa lượt này" onclick="convoEditTurn(${index})">✏️</button>` : ''}
     </div>
     ${info.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">${info.join('')}</div>` : ''}
-    ${showExplain && turn.vocabulary_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Từ vựng: ${convoFmtExplain(turn.vocabulary_explanations, 'v')}</div>` : ''}
+    ${showExplain && turn.vocabulary_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Từ vựng: ${convoFmtExplain(turn.vocabulary_explanations, 'v', true)}</div>` : ''}
     ${showExplain && turn.grammar_explanations ? `<div style="margin-top:4px;font-size:.75rem;opacity:.6">Ngữ pháp: ${convoFmtExplain(turn.grammar_explanations, 'g')}</div>` : ''}
   </div>`;
 }
@@ -337,11 +338,14 @@ async function loadConvoDetail(dialogueId) {
   const el = document.getElementById('content');
   if (el) el.innerHTML = renderConvoDetail(convo);
   window.scrollTo(0, 0);
+  convoVocabInfo = null;
+  convoLoadVocabStatus(); // V153: huy hiệu từ vựng ↔ kho từ (chạy nền, lỗi không ảnh hưởng)
 }
 
 function convoRedrawDetail() {
   const el = document.getElementById('content');
   if (el && currentConvo) el.innerHTML = renderConvoDetail(currentConvo);
+  if (currentConvo) convoLoadVocabStatus();
 }
 
 // Yêu thích
@@ -418,12 +422,12 @@ const convoIsAdmin = () => typeof isAdminRole === 'function' && isAdminRole();
 const CONVO_STATUS_LABEL = { pending: '⏳ Chờ sinh', generating: '⚙️ Đang sinh', draft: '📝 Nháp (chờ duyệt)', ready: '✅ Đã duyệt', failed: '⚠️ Lỗi' };
 
 // Hiển thị mảng giải thích {hz,py,vi} / {pattern,note_vi}; dữ liệu cũ dạng khác thì in nguyên văn đã escape
-function convoFmtExplain(v, kind) {
+function convoFmtExplain(v, kind, withStatus) {
   if (!Array.isArray(v)) return escapeHtml(typeof v === 'string' ? v : JSON.stringify(v));
   return v.map((x) => {
     if (typeof x === 'string') return escapeHtml(x);
     if (!x || typeof x !== 'object') return '';
-    if (kind === 'v') return escapeHtml(x.hz || '') + (x.py ? ' (' + escapeHtml(x.py) + ')' : '') + (x.vi ? ': ' + escapeHtml(x.vi) : '');
+    if (kind === 'v') return escapeHtml(x.hz || '') + (x.py ? ' (' + escapeHtml(x.py) + ')' : '') + (x.vi ? ': ' + escapeHtml(x.vi) : '') + (withStatus ? '<span class="convo-vs" data-hz="' + escapeHtml(x.hz || '') + '" style="opacity:.9"></span>' : '');
     return escapeHtml(x.pattern || '') + (x.note_vi ? ' — ' + escapeHtml(x.note_vi) : '');
   }).filter(Boolean).join(' · ');
 }
@@ -435,14 +439,20 @@ function convoAdminBar(convo) {
   const btn = (label, onclick, primary) => `<button class="btn btn-sm${primary ? ' btn-primary' : ''}" onclick="${onclick}">${label}</button>`;
   const hasTurns = (convo.turns || []).length > 0;
   const actions = [];
-  if (st === 'draft') actions.push(btn('✅ Duyệt (người học sẽ thấy)', `convoSetApproval('${id}','ready')`, true));
+  if (st === 'draft') { actions.push(btn('✅ Duyệt & bản nháp kế', `convoApproveAndNext('${id}')`, true)); actions.push(btn('✅ Chỉ duyệt', `convoSetApproval('${id}','ready')`)); }
   if (st === 'ready') actions.push(btn('↩️ Gỡ duyệt', `convoSetApproval('${id}','draft')`));
   if (st === 'pending' || st === 'failed' || !hasTurns) actions.push(btn('✨ Sinh bằng AI', `convoGenerate(1,['${id}'],false)`, true));
   else actions.push(btn('🔄 Sinh lại', `convoRegenerate('${id}')`));
+  const metaParts = [];
+  if (convo.generated_at) metaParts.push('AI soạn lúc ' + escapeHtml(convoFmtDate(convo.generated_at)));
+  if (convo.gen_attempts) metaParts.push(Number(convo.gen_attempts) + ' lần sinh');
+  if (convo.gen_model) metaParts.push('model: ' + escapeHtml(String(convo.gen_model).slice(0, 40)));
+  metaParts.push((convo.turns || []).length + ' lượt');
+  const meta = `<div style="font-size:.72rem;opacity:.65;margin-top:4px">${metaParts.join(' · ')} · bấm ✏️ ở từng lượt để sửa trước khi duyệt</div>`;
   const err = (st === 'failed' && convo.gen_error) ? `<div style="font-size:.75rem;color:#c0392b;margin-top:4px">${escapeHtml(String(convo.gen_error).slice(0, 300))}</div>` : '';
   return `<div style="border:1px dashed rgba(128,128,128,.5);border-radius:10px;padding:8px;margin-bottom:10px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><strong>🛠 Quản trị</strong><span>${CONVO_STATUS_LABEL[st] || escapeHtml(st)}</span>${actions.join('')}</div>
-    ${err}<div id="convo-gen-msg" style="font-size:.8rem;margin-top:4px"></div></div>`;
+    ${meta}${err}<div id="convo-vocab-admin" style="margin-top:6px"></div><div id="convo-gen-msg" style="font-size:.8rem;margin-top:4px"></div></div>`;
 }
 
 async function loadConvoAdmin() {
@@ -451,17 +461,25 @@ async function loadConvoAdmin() {
   const r = await convoRequest('GET', '/admin/conversations');
   const live = document.getElementById('convo-admin');
   if (!live) return; // đã chuyển tab
-  if (!r.ok || !r.counts) { live.innerHTML = ''; return; }
+  if (!r.ok || !r.counts) {
+    // KHÔNG im lặng: admin phải thấy vì sao bảng quản trị không có (route chưa deploy, thiếu bảng conversations, v.v.)
+    live.innerHTML = `<div class="panel" style="margin-bottom:10px;border:1px dashed #c0392b">
+      <strong>🛠 Quản trị hội thoại</strong> — <span style="color:#c0392b">không tải được: ${escapeHtml(r.error || 'lỗi không rõ')}</span>
+      <div style="margin-top:6px"><button class="btn btn-sm" onclick="loadConvoAdmin()">Thử lại</button></div></div>`;
+    return;
+  }
   const c = r.counts, items = r.items || [];
   const drafts = items.filter((x) => x.gen_status === 'draft');
   const failed = items.filter((x) => x.gen_status === 'failed').slice(0, 5);
   const row = (x, extra) => `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0">
       <span style="flex:1;min-width:140px">${escapeHtml(x.title_zh)} <small style="opacity:.7">${escapeHtml(x.title_vi)}</small></span>${extra}</div>`;
-  live.innerHTML = `<details class="panel" style="margin-bottom:10px"${(c.draft || c.failed) ? ' open' : ''}>
+  live.innerHTML = `<details class="panel" style="margin-bottom:10px" open>
     <summary style="cursor:pointer"><strong>🛠 Quản trị hội thoại</strong> — ⏳ ${c.pending | 0} chờ · 📝 ${c.draft | 0} nháp · ✅ ${c.ready | 0} đã duyệt · ⚠️ ${c.failed | 0} lỗi</summary>
     <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" onclick="convoGenerate(1)">✨ Sinh 1 bài tiếp theo</button>
       <button class="btn btn-sm" onclick="convoGenerate(3)">✨ Sinh 3 bài</button>
+      <button class="btn btn-sm" id="convo-auto-btn" onclick="convoAutoRun()">${convoAutoRunning ? '⏹ Dừng' : '⚡ Sinh tự động'}</button>
+      ${c.draft > 1 ? `<button class="btn btn-sm" onclick="convoApproveAll(${c.draft | 0})">✅ Duyệt tất cả (${c.draft | 0})</button>` : ''}
     </div>
     <div id="convo-gen-msg" style="font-size:.8rem;margin-top:6px;min-height:1em"></div>
     ${drafts.length ? '<div style="margin-top:8px"><strong>Bản nháp chờ duyệt</strong>' + drafts.map((x) => row(x,
@@ -520,6 +538,134 @@ async function convoSetApproval(dialogueId, status) {
   convoGenMsg(status === 'ready' ? '✅ Đã duyệt — người học thấy bài này.' : '↩️ Đã gỡ duyệt — bài về trạng thái nháp.');
 }
 
+
+// ── V153: GIAI ĐOẠN 2 — sinh tự động, duyệt hàng loạt, sửa lượt thoại, nối từ vựng với kho từ (FSRS) ──
+let convoAutoRunning = false;
+let convoAutoStopFlag = false;
+let convoVocabInfo = null; // { hzs, status } của hội thoại đang mở
+
+function convoFmtDate(iso) {
+  try { const d = new Date(iso); return isNaN(d.getTime()) ? '' : d.toLocaleString('vi-VN'); } catch (e) { return ''; }
+}
+
+// Chạy liên tiếp (mỗi vòng ≤3 bài) cho tới khi: hết bài, hết hạn mức AI, chạm hạn mức ngày, lỗi liên tiếp, hoặc admin bấm Dừng.
+async function convoAutoRun() {
+  if (convoAutoRunning) { convoAutoStopFlag = true; convoGenMsg('⏹ Sẽ dừng sau khi bài đang sinh xong…'); return; }
+  if (convoGenBusy) return;
+  convoAutoRunning = true; convoAutoStopFlag = false; convoGenBusy = true;
+  const btn = () => document.getElementById('convo-auto-btn');
+  if (btn()) btn().textContent = '⏹ Dừng';
+  let drafted = 0, failedN = 0, noProgress = 0, why = '';
+  for (let i = 0; i < 20 && !convoAutoStopFlag; i++) {
+    convoGenMsg(`⚡ Đang sinh tự động… ${drafted} bản nháp, ${failedN} lỗi (giữ trang mở; bấm Dừng để ngắt)`);
+    const r = await convoRequest('POST', '/admin/conversations/generate', { count: 3 });
+    if (!r.ok) { why = '⚠️ ' + (r.error || 'Lỗi'); break; }
+    const res = r.results || [];
+    const d = res.filter((x) => x.status === 'draft').length;
+    drafted += d; failedN += res.filter((x) => x.status === 'failed').length;
+    if (r.quota) { why = '⛔ Hết hạn mức AI'; break; }
+    if (r.limitReached) { why = `⛔ Chạm hạn mức ngày (${r.generatedToday}/${r.dailyLimit})`; break; }
+    if (!res.length) { why = '✔ Không còn bài nào cần sinh'; break; }
+    noProgress = d ? 0 : noProgress + 1;
+    if (noProgress >= 2) { why = '⚠️ Nhiều bài lỗi liên tiếp — dừng để kiểm tra'; break; }
+  }
+  convoAutoRunning = false; convoGenBusy = false;
+  await loadConvoAdmin();
+  convoGenMsg(`${why || (convoAutoStopFlag ? '⏹ Đã dừng' : 'Đã chạy xong số vòng tối đa')} — ${drafted} bản nháp mới, ${failedN} lỗi.`);
+}
+
+async function convoApproveAll(n) {
+  if (!confirm(`Duyệt TẤT CẢ ${n} bản nháp? Người học sẽ thấy ngay các bài này — bạn đã xem qua chúng chưa?`)) return;
+  const r = await convoRequest('POST', '/admin/conversations/approve-all', {});
+  if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không duyệt được')); return; }
+  await loadConvoAdmin();
+  convoGenMsg(`✅ Đã duyệt ${r.approved | 0} bài.`);
+}
+
+// Duyệt rồi nhảy sang bản nháp kế tiếp (xem-duyệt liên tục)
+async function convoApproveAndNext(dialogueId) {
+  const id = convoSafeId(dialogueId);
+  const r = await convoRequest('POST', '/admin/conversations/' + encodeURIComponent(id) + '/status', { status: 'ready' });
+  if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không duyệt được')); return; }
+  const ov = await convoRequest('GET', '/admin/conversations');
+  const next = ov.ok && (ov.items || []).find((x) => x.gen_status === 'draft' && x.dialogue_id !== id);
+  if (next) { await loadConvoDetail(next.dialogue_id); convoGenMsg('✅ Đã duyệt ' + id + ' — đây là bản nháp kế tiếp.'); }
+  else { await loadConvoDetail(id); convoGenMsg('✅ Đã duyệt — hết bản nháp chờ.'); }
+}
+
+// Sửa tay 1 lượt ngay tại thẻ (chỉ admin)
+function convoEditTurn(index) {
+  if (!convoIsAdmin() || !currentConvo) return;
+  const t = (currentConvo.turns || [])[index];
+  const host = document.getElementById('convo-turn-' + index);
+  if (!t || !host) return;
+  const inp = 'width:100%;box-sizing:border-box;padding:6px;border-radius:8px;border:1px solid rgba(128,128,128,.5);font:inherit;margin:2px 0 6px';
+  host.innerHTML = `<div style="font-weight:700;margin-bottom:4px">✏️ Sửa lượt ${index + 1} (${escapeHtml(t.character)})</div>
+    <label style="font-size:.75rem;opacity:.7">Chữ Hán</label><input id="convo-ed-zh-${index}" style="${inp}" value="${escapeHtml(t.chinese_text)}">
+    <label style="font-size:.75rem;opacity:.7">Pinyin (mỗi chữ Hán một âm tiết, cách nhau dấu cách)</label><input id="convo-ed-py-${index}" style="${inp}" value="${escapeHtml(t.pinyin)}">
+    <label style="font-size:.75rem;opacity:.7">Tiếng Việt</label><textarea id="convo-ed-vi-${index}" rows="2" style="${inp}">${escapeHtml(t.vietnamese_text)}</textarea>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" onclick="convoSaveTurn(${index})">💾 Lưu</button><button class="btn btn-sm" onclick="convoRedrawDetail()">Huỷ</button></div>
+    <div id="convo-ed-msg-${index}" style="font-size:.8rem;color:#c0392b;margin-top:4px"></div>`;
+}
+
+async function convoSaveTurn(index) {
+  if (!convoIsAdmin() || !currentConvo) return;
+  const val = (id) => { const el = document.getElementById(id); return el ? String(el.value || '') : ''; };
+  const msg = document.getElementById('convo-ed-msg-' + index);
+  const r = await convoRequest('POST', '/admin/conversations/' + encodeURIComponent(convoSafeId(currentConvo.dialogue_id)) + '/turns/' + (index + 1), {
+    chinese_text: val('convo-ed-zh-' + index), pinyin: val('convo-ed-py-' + index), vietnamese_text: val('convo-ed-vi-' + index),
+  });
+  if (!r.ok) { if (msg) msg.textContent = '⚠️ ' + (r.error || 'Không lưu được'); return; }
+  Object.assign(currentConvo.turns[index], r.turn || {});
+  convoRedrawDetail();
+  convoGenMsg('💾 Đã lưu lượt ' + (index + 1) + '.');
+}
+
+// Từ vựng AI soạn trong hội thoại ↔ kho từ vựng của app (kho → bài học → FSRS)
+async function convoLoadVocabStatus() {
+  const convo = currentConvo;
+  if (!convo || !(convo.turns || []).length) return;
+  if (!convoIsAdmin() && !convoPref('show_explanations', false)) return; // người học chỉ cần khi đang hiện phần giải thích
+  const hzs = [];
+  for (const t of convo.turns) {
+    if (Array.isArray(t.vocabulary_explanations)) for (const v of t.vocabulary_explanations) if (v && v.hz && !hzs.includes(v.hz)) hzs.push(v.hz);
+  }
+  if (!hzs.length) { convoVocabInfo = null; convoRenderVocabAdmin(); return; }
+  const r = await convoRequest('POST', '/conversations/vocab-status', { hzs: hzs.slice(0, 100) });
+  if (!r.ok || currentConvo !== convo) return;
+  convoVocabInfo = { hzs, status: r.status || {} };
+  if (typeof document.querySelectorAll === 'function') {
+    document.querySelectorAll('.convo-vs').forEach((el) => {
+      const st = convoVocabInfo.status[el.getAttribute('data-hz')];
+      el.textContent = st ? (st.lessons && st.lessons.length ? ' ✓ bài ' + st.lessons.join(', ') : ' ✓ có trong kho') : ' ＋ mới';
+    });
+  }
+  convoRenderVocabAdmin();
+}
+
+function convoRenderVocabAdmin() {
+  const box = document.getElementById('convo-vocab-admin');
+  if (!box || !convoIsAdmin()) return;
+  const info = convoVocabInfo;
+  if (!info) { box.innerHTML = ''; return; }
+  const missing = info.hzs.filter((hz) => !info.status[hz]);
+  if (!missing.length) { box.innerHTML = `<span style="font-size:.8rem">📚 Cả ${info.hzs.length} từ vựng đã có trong kho từ.</span>`; return; }
+  box.innerHTML = `<span style="font-size:.8rem">📚 ${missing.length}/${info.hzs.length} từ chưa có trong kho</span>
+    <input id="convo-vocab-lesson" type="number" min="1" max="9999" placeholder="Bài số" style="width:84px;padding:4px;border-radius:8px;border:1px solid rgba(128,128,128,.5)">
+    <button class="btn btn-sm" onclick="convoAddVocab()">＋ Thêm vào kho</button>`;
+}
+
+async function convoAddVocab() {
+  if (!convoIsAdmin() || !currentConvo) return;
+  const el = document.getElementById('convo-vocab-lesson');
+  const lesson = parseInt(el && el.value, 10);
+  if (!Number.isFinite(lesson) || lesson < 1) { convoGenMsg('⚠️ Nhập số bài học (1–9999) để thêm từ vào.'); return; }
+  const r = await convoRequest('POST', '/admin/conversations/' + encodeURIComponent(convoSafeId(currentConvo.dialogue_id)) + '/add-vocab', { lesson });
+  if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không thêm được')); return; }
+  convoGenMsg(`📚 Đã thêm ${r.added | 0} từ mới vào bài ${lesson} (đã có sẵn ${r.existing | 0}). Học viên học bài này sẽ có thẻ FSRS cho các từ đó.`);
+  await convoLoadVocabStatus();
+}
+
 // ── Điểm vào (được js/navigation.js gọi khi mở tab "Hội thoại") ──
 function renderConvo() {
   return renderConvoList();
@@ -544,6 +690,13 @@ if (typeof module !== 'undefined' && module.exports) module.exports = {
   convoGenerate,
   convoSetApproval,
   convoFmtExplain,
+  convoAutoRun,
+  convoApproveAll,
+  convoApproveAndNext,
+  convoEditTurn,
+  convoSaveTurn,
+  convoAddVocab,
+  convoLoadVocabStatus,
   convoPlayTurn,
   convoPlayAll,
   toggleFavorite,
