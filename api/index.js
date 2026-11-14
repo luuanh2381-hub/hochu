@@ -21,7 +21,10 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   getBookDefs, createBookDef, updateBookDef, deleteBookDef, getLessonsByWordIds,
   countDueFsrsCards, // countDueFsrsCards: V104 (tổng quan phân tích năng lực)
   getConversations, getConversationWithTurns, getConversationProgressForUser, updateConversationProgress, // V145: thư viện hội thoại
-  toggleConversationFavorite, getConversationStats } = require('../lib/db');
+  toggleConversationFavorite, getConversationStats,
+  pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
+} = require('../lib/db');
+const conversationGen = require('../lib/conversation-gen'); // V152
 const { getFsrsVerificationInfo } = require('../lib/fsrs');
 // V69: mọi review + toàn bộ analytics/optimizer/personal-retention giờ đi qua lib/fsrs/ (scheduler
 // layer chuẩn hóa) — api/index.js KHÔNG còn gọi thẳng db.reviewFsrsCard nữa (Phần 4 của audit).
@@ -2827,15 +2830,16 @@ async function callWithRetry(doFn, intervalMs = GEMINI_MIN_INTERVAL_MS) {
 // Gọi AI văn bản qua API OpenAI-compatible của Vilao. Giữ tên callGemini để KHÔNG phải sửa các nơi gọi.
 // Thử lần lượt từng model trong AI_MODELS: lỗi tạm thời / hết quota / model không dùng được → sang model kế tiếp;
 // chỉ báo lỗi khi tất cả model đều lỗi (hoặc lỗi cấu hình như thiếu key, sai key).
-function callGemini(prompt) {
-  return callWithRetry(() => callAiWithFallback(prompt), AI_MIN_INTERVAL_MS);
+// V152: opts (tuỳ chọn) { maxTokens, timeoutMs } cho đầu ra dài (sinh hội thoại); không truyền → y hệt trước (4096 token, 25 giây).
+function callGemini(prompt, opts) {
+  return callWithRetry(() => callAiWithFallback(prompt, opts), AI_MIN_INTERVAL_MS);
 }
-async function callAiWithFallback(prompt) {
+async function callAiWithFallback(prompt, opts) {
   if (!process.env.AI_API_KEY) throw new Error('Chưa cấu hình AI_API_KEY trên server');
   let lastErr;
   for (const model of AI_MODELS) {
     try {
-      return await doCallAi(model, prompt);
+      return await doCallAi(model, prompt, true, opts);
     } catch (e) {
       lastErr = e;
       if (e.fatal) throw e; // sai key / sai URL: thử model khác cũng vô ích
@@ -2846,7 +2850,7 @@ async function callAiWithFallback(prompt) {
 }
 // Một số model suy luận trả kèm <think>...</think> — bỏ đi để còn lại JSON thuần.
 function stripThink(t) { return String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim(); }
-function doCallAi(model, prompt, useJsonMode = true) {
+function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
   return new Promise((resolve, reject) => {
     const apiKey = process.env.AI_API_KEY;
     let url;
@@ -2855,7 +2859,7 @@ function doCallAi(model, prompt, useJsonMode = true) {
       model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
-      max_tokens: 4096,
+      max_tokens: (opts && opts.maxTokens) || 4096,
       stream: false,
     };
     if (useJsonMode) body.response_format = { type: 'json_object' };
@@ -2887,7 +2891,7 @@ function doCallAi(model, prompt, useJsonMode = true) {
           const text = typeof msg === 'string' ? msg : JSON.stringify(msg);
           // Proxy không hỗ trợ response_format → thử lại không dùng JSON mode (prompt vẫn yêu cầu JSON)
           if (status === 400 && useJsonMode && /response_format|json_object|json mode/i.test(text)) {
-            return doCallAi(model, prompt, false).then(resolve, reject);
+            return doCallAi(model, prompt, false, opts).then(resolve, reject);
           }
           const err = new Error(`[${model}] HTTP ${status}: ${text}`);
           if (status === 401 || status === 403) err.fatal = true;
@@ -2904,7 +2908,8 @@ function doCallAi(model, prompt, useJsonMode = true) {
       });
     });
     reqq.on('error', (e) => reject(new Error('Không kết nối được tới AI API: ' + e.message)));
-    reqq.setTimeout(25000, () => { reqq.destroy(new Error('AI API timeout sau 25s')); });
+    const aiTimeoutMs = (opts && opts.timeoutMs) || 25000;
+    reqq.setTimeout(aiTimeoutMs, () => { reqq.destroy(new Error('AI API timeout sau ' + Math.round(aiTimeoutMs / 1000) + 's')); });
     reqq.write(payload);
     reqq.end();
   });
@@ -3742,6 +3747,10 @@ app.get('/api/conversations', async (req, res) => {
   if (!authed) return;
   try {
     const filters = {};
+    // V152: người học chỉ thấy bài đã duyệt; quản trị viên thêm ?all=1 để thấy cả bài nháp/đang chờ
+    const convoUser = authed.db.users[authed.username];
+    const convoIsAdmin = !!convoUser && (convoUser.role === 'admin' || convoUser.role === 'superadmin');
+    if (convoIsAdmin && req.query.all === '1') filters.includeUnready = true;
     if (req.query.hsk_level) filters.hsk_level = String(req.query.hsk_level);
     if (req.query.topic) filters.topic = String(req.query.topic);
     if (req.query.search) filters.search = String(req.query.search).slice(0, 100);
@@ -3761,7 +3770,9 @@ app.get('/api/conversations/:id', async (req, res) => {
   const authed = await requireAuth(req, res);
   if (!authed) return;
   try {
-    const conversation = await getConversationWithTurns(String(req.params.id));
+    const convoUser = authed.db.users[authed.username];
+    const convoIsAdmin = !!convoUser && (convoUser.role === 'admin' || convoUser.role === 'superadmin');
+    const conversation = await getConversationWithTurns(String(req.params.id), { includeUnready: convoIsAdmin }); // V152
     if (!conversation) {
       return res.status(404).json({ ok: false, error: 'Hội thoại không tồn tại' });
     }
@@ -3794,6 +3805,81 @@ app.post('/api/conversations/:id/favorite', async (req, res) => {
     const isFavorited = body.is_favorited === undefined ? true : body.is_favorited === true || body.is_favorited === 'true';
     await toggleConversationFavorite(authed.username, conversationId, isFavorited);
     res.json({ ok: true });
+  } catch (e) { fail(res, e); }
+});
+
+
+// ── V152: QUẢN TRỊ — sinh lượt thoại bằng AI, duyệt bài ─────────────────────────────────────────
+// Luồng: pending → (AI soạn + kiểm tra tự động) → draft → (admin xem, bấm Duyệt) → ready (người học thấy).
+app.get('/api/admin/conversations', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  if (!requireAdmin(authed.db.users[authed.username], res)) return;
+  try {
+    res.json({ ok: true, ...(await getConversationGenOverview()) });
+  } catch (e) { fail(res, e); }
+});
+
+// Sinh cho tối đa 3 bài mỗi lượt gọi (mỗi bài ~30-100 giây; hàm Vercel tối đa 300 giây). body: { dialogueIds?: string[], count?: 1-3, targetTurns?: 12-34, force?: boolean }
+app.post('/api/admin/conversations/generate', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const body = req.body || {};
+    const startedAt = Date.now();
+    const BUDGET_MS = 240000, NEED_PER_ITEM_MS = 110000;
+    const targetTurns = conversationGen.clampTarget(body.targetTurns);
+    let ids = Array.isArray(body.dialogueIds) ? body.dialogueIds.map(String).filter((x) => /^[A-Za-z0-9_-]{1,50}$/.test(x)).slice(0, 3) : [];
+    if (!ids.length) ids = await pickConversationsForGen(Math.max(1, Math.min(3, parseInt(body.count, 10) || 1)));
+    const results = [];
+    let quota = false;
+    for (const dialogueId of ids) {
+      if (quota || Date.now() - startedAt > BUDGET_MS - NEED_PER_ITEM_MS) { results.push({ dialogueId, status: 'skipped' }); continue; }
+      const convo = await getConversationForGen(dialogueId);
+      if (!convo) { results.push({ dialogueId, status: 'not_found' }); continue; }
+      if (convo.gen_status === 'ready' && body.force !== true) { results.push({ dialogueId, status: 'skipped_ready' }); continue; }
+      await setConversationGenState(convo.id, 'generating', null);
+      try {
+        const r = await conversationGen.generateConversationTurns({
+          convo, targetTurns,
+          callModel: (prompt) => callGemini(prompt, { maxTokens: 8000, timeoutMs: 120000 }),
+        });
+        if (!r.ok) {
+          await setConversationGenState(convo.id, 'failed', r.errors.join(' | '));
+          results.push({ dialogueId, status: 'failed', errors: r.errors, attempts: r.attempts });
+          continue;
+        }
+        await saveGeneratedConversation(convo.id, r.turns, { model: AI_MODELS.join(','), promptVersion: r.promptVersion });
+        results.push({ dialogueId, status: 'draft', turns: r.turns.length, attempts: r.attempts, warnings: r.warnings });
+      } catch (e) {
+        const msg = cleanErrorMsg(e && e.message);
+        await setConversationGenState(convo.id, 'failed', msg).catch(() => {});
+        results.push({ dialogueId, status: 'failed', errors: [msg] });
+        if (isQuotaGeminiError(e && e.message)) quota = true;
+      }
+    }
+    const drafted = results.filter((x) => x.status === 'draft').length;
+    logActivity(authed.username, actingUser.role, 'conversation',
+      `Sinh hội thoại bằng AI: ${drafted}/${ids.length} bài thành bản nháp${quota ? ' — hết hạn mức AI' : ''}`);
+    res.json({ ok: true, results, quota });
+  } catch (e) { fail(res, e); }
+});
+
+// Duyệt (ready) / gỡ duyệt (draft). body: { status }
+app.post('/api/admin/conversations/:dialogueId/status', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const status = req.body && req.body.status;
+    if (status !== 'ready' && status !== 'draft') return res.status(400).json({ ok: false, error: 'status phải là ready hoặc draft' });
+    const row = await setConversationApproval(String(req.params.dialogueId), status);
+    if (!row) return res.status(404).json({ ok: false, error: 'Không có bài này ở trạng thái nháp/đã duyệt (hoặc chưa có lượt thoại)' });
+    logActivity(authed.username, actingUser.role, 'conversation', `${status === 'ready' ? 'Duyệt' : 'Gỡ duyệt'} hội thoại ${row.dialogue_id}`);
+    res.json({ ok: true, dialogue_id: row.dialogue_id, gen_status: row.gen_status });
   } catch (e) { fail(res, e); }
 });
 
