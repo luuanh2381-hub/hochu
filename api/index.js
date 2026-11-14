@@ -24,7 +24,7 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   toggleConversationFavorite, getConversationStats,
   pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
   countConversationsGeneratedToday, approveAllConversationDrafts, updateConversationTurn, getVocabStatusByHz, addConversationVocabToLesson, // V153
-  getConversationSchemaStatus, getConversationDataReport, // V154
+  getConversationSchemaStatus, getConversationDataReport, importConversationBatches, // V154
 } = require('../lib/db');
 const conversationGen = require('../lib/conversation-gen'); // V152
 const { schemaErrorResponse } = require('../lib/conversation-schema'); // V154: lỗi lược đồ hội thoại có phân loại
@@ -3838,6 +3838,19 @@ app.get('/api/admin/conversations', async (req, res) => {
     try { dataReport = await getConversationDataReport(); } catch (e) { console.error('⚠️  dataReport hội thoại:', e && e.message); }
     const st = getConversationSchemaStatus();
     res.json({ ok: true, ...overview, dataReport, schema: { ok: st.ok, warnings: st.warnings || [], created: (st.applied && st.applied.createdTables) || [] } });
+  } catch (e) { convoFail(res, e); }
+});
+
+// V154: admin bấm "Nhập dữ liệu" → nhập các batch V145 còn thiếu (idempotent, không đè bài đã có). Không bao giờ tự chạy.
+app.post('/api/admin/conversations/import-batches', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const out = await importConversationBatches();
+    logActivity(authed.username, actingUser.role, 'conversation', `Nhập dữ liệu hội thoại: thêm ${out.added} bài từ batch ${out.imported.map((x) => x.batch).join(',') || '(không có)'}`);
+    res.json({ ok: true, ...out });
   } catch (e) { convoFail(res, e); }
 });
 
