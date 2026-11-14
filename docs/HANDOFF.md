@@ -3,6 +3,16 @@
 Cập nhật lần cuối: 2026-11-14 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V152 — Sinh lượt thoại bằng AI cho thư viện hội thoại (2026-11-14, chưa chạy Postgres/AI thật)
+Bảng `conversations` có ~200 "đầu bài" nhưng `conversation_turns` trống. V152 thêm luồng: **pending → AI soạn + máy kiểm tra → draft → admin duyệt → ready** (người học chỉ thấy `ready`).
+- `lib/conversation-gen.js` (thuần, test được): `buildPrompt`, `parseModelJson`, `validateTurns`, `generateConversationTurns` (thử lại tối đa 3 lần, đưa lỗi lần trước vào prompt). Kiểm tra cứng: JSON, số lượt, nhân vật, chữ Hán đủ/không số-Latin, **số âm tiết pinyin = số chữ Hán** (chấp nhận 儿 gộp âm), không trùng lượt, tiếng Việt không lẫn chữ Hán, `vocab.hz` phải nằm trong câu (sai thì loại mục đó). **Chưa kiểm soát cấp HSK bằng danh sách từ** (app chưa có bảng HSK): giữ bằng prompt + khâu duyệt tay.
+- AI dùng `callGemini(prompt, {maxTokens, timeoutMs})` (thực chất là API Vilao tương thích OpenAI: `AI_API_KEY`, `AI_MODELS`; mặc định cũ 4096 token/25s không đổi). Sinh với 8000 token/120s. Gemini thật chỉ dùng để chấm phát âm.
+- DB (`lib/db.js`): `ensureConversationGenSchema` tự thêm cột `gen_status, gen_error, gen_model, gen_prompt_version, gen_attempts, generated_at`, hạ CHECK `total_turns >= 30` xuống `>= 12`, thêm `UNIQUE(conversation_id, turn_number)`, và coi bài ĐÃ CÓ lượt thoại là `ready`. Có file chạy tay tương đương `migrations/V152_conversation_generation.sql`. `saveGeneratedConversation` = 1 transaction ngắn (khoá hàng → xoá → INSERT nhiều dòng → bài thành `draft` → reset `last_played_turn`); gọi AI TRƯỚC khi mở kết nối (pool chỉ vài kết nối). `getConversations/getConversationWithTurns/getConversationStats` chỉ trả bài `ready` trừ khi admin (`includeUnready`).
+- API (admin): `GET /api/admin/conversations` (đếm + danh sách), `POST /api/admin/conversations/generate` {dialogueIds?|count (≤3), targetTurns (12–34), force?}, `POST /api/admin/conversations/:dialogueId/status` {ready|draft}. Bài `ready` không bị ghi đè nếu thiếu `force:true`.
+- UI (`js/conversation.js`): bảng "🛠 Quản trị hội thoại" ở danh sách (đếm theo trạng thái, nút Sinh 1/3 bài, danh sách nháp có Xem/Duyệt, danh sách lỗi có Thử lại) + thanh quản trị ở trang chi tiết; giải thích từ vựng/ngữ pháp hiện dạng chữ thay vì JSON thô.
+- **Tác động cần biết:** sau khi deploy, thư viện hội thoại của NGƯỜI HỌC sẽ trống cho tới khi có bài được duyệt (trước đó cũng chỉ là khung rỗng vì chưa có lượt thoại).
+- Test: `npm run test:v152` (18 test). Chưa làm: sinh theo lô tự động/cron, dạng bài "chọn câu đáp lại" từ hội thoại, nối "Thêm từ vào học" (giai đoạn 2–3).
+
 ## V151 — Nút "🖼️ Tạo ảnh" ngay trên màn câu hỏi (2026-11-14, chưa thử trên trình duyệt thật)
 Thanh đầu thẻ (`.rv-head-act`) có nút tạo ảnh gợi nhớ cho từ đang học — CHỈ quản trị viên, CHỈ khi từ chưa có ảnh (đã `ready` thì ô tự biến mất). Gọi `POST /api/admin/word-images/generate` {hz:[hz]} (≤~50 giây),
 bấm đúp không vẽ 2 lần (`gen` Map trong `js/word-image.js`), lỗi hiện lý do + "Thử lại". Cố ý KHÔNG hiện ảnh ở màn câu hỏi (ảnh có thể lộ đáp án): vẽ xong, ảnh hiện ở màn đáp án như cũ (cache đã xoá).
