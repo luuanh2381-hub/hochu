@@ -3,6 +3,14 @@
 Cập nhật lần cuối: 2026-11-14 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V153 — Hội thoại AI giai đoạn 2 + sửa lỗi "không thấy nút sinh AI" (2026-11-14, chưa chạy Postgres/AI thật)
+**Lỗi "không thấy nút":** bảng quản trị nằm trong `<details>` chỉ tự mở khi có nháp/lỗi, và khi `/api/admin/conversations` lỗi thì bảng bị xoá trắng IM LẶNG. Nay khung LUÔN mở; lỗi hiện rõ kèm "Thử lại"; lỗi lược đồ (thiếu bảng `conversations`, thiếu quyền ALTER) trả 503 kèm nguyên nhân thật (`convoGenSchemaLastError`). Nguyên nhân thường gặp khác: chưa deploy V152, hoặc tài khoản không phải admin/superadmin (`isAdminRole()` ở `js/auth.js`).
+- **Sinh tự động** (nút ⚡, lặp ≤20 vòng × ≤3 bài; dừng khi hết bài / hết quota AI / chạm hạn mức ngày / 2 vòng liền không ra bài / bấm Dừng). Lõi dùng chung `runConversationGeneration` (route admin + cron). **Hạn mức ngày** `CONVERSATION_GEN_DAILY_LIMIT` (mặc định 20, ≤0 = không giới hạn, đếm theo ngày giờ VN, chỉ áp cho sinh tự chọn). **Cron:** `GET /api/cron/generate-daily?task=conversations` (1 bài/lượt, cần `Authorization: Bearer $CRON_SECRET` nếu đã đặt); KHÔNG tự thêm vào `vercel.json` (gói Hobby giới hạn số cron) — gọi bằng cron ngoài/GitHub Actions nếu muốn.
+- **Duyệt:** "Duyệt tất cả" (`POST /api/admin/conversations/approve-all`), "Duyệt & bản nháp kế", metadata AI (model, số lần sinh, thời điểm).
+- **Sửa tay từng lượt** (`POST /api/admin/conversations/:dialogueId/turns/:n`): kiểm tra bằng đúng `validateTurnEdit` như bản AI; vocab không còn nằm trong câu mới bị tỉa.
+- **Từ vựng ↔ kho từ ↔ FSRS:** `POST /api/conversations/vocab-status` (mọi người dùng đã đăng nhập) cho huy hiệu ✓ bài N / ＋ mới cạnh từng từ; admin thấy số từ chưa có + ô nhập số bài + nút "Thêm vào kho" (`POST .../add-vocab` {lesson 1–9999}): CHỈ thêm từ chưa có (tag `hoi-thoai`), không đụng từ đã có; từ vào bài thì tự chảy vào FSRS theo cơ chế sẵn có khi học viên học bài đó.
+- Test: `npm run test:v153` (14 test). Chưa làm: dạng bài FSRS "chọn câu đáp lại" từ hội thoại; sinh câu ví dụ FSRS từ lượt thoại.
+
 ## V152 — Sinh lượt thoại bằng AI cho thư viện hội thoại (2026-11-14, chưa chạy Postgres/AI thật)
 Bảng `conversations` có ~200 "đầu bài" nhưng `conversation_turns` trống. V152 thêm luồng: **pending → AI soạn + máy kiểm tra → draft → admin duyệt → ready** (người học chỉ thấy `ready`).
 - `lib/conversation-gen.js` (thuần, test được): `buildPrompt`, `parseModelJson`, `validateTurns`, `generateConversationTurns` (thử lại tối đa 3 lần, đưa lỗi lần trước vào prompt). Kiểm tra cứng: JSON, số lượt, nhân vật, chữ Hán đủ/không số-Latin, **số âm tiết pinyin = số chữ Hán** (chấp nhận 儿 gộp âm), không trùng lượt, tiếng Việt không lẫn chữ Hán, `vocab.hz` phải nằm trong câu (sai thì loại mục đó). **Chưa kiểm soát cấp HSK bằng danh sách từ** (app chưa có bảng HSK): giữ bằng prompt + khâu duyệt tay.
