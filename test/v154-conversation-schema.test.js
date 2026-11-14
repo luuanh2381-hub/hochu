@@ -472,6 +472,43 @@ test('(11) verify-conversations: FAIL khi thiếu bảng, WARNING khi thiếu th
   c.end();
 }, { db: true });
 
+test('seed nhúng (lib/conversation-seed.js) KHỚP TỪNG BYTE với 8 file SQL; route import chỉ admin, không tự chạy; chỉ nhập batch còn thiếu', () => {
+  const seed = require('../lib/conversation-seed'); const B = require('../lib/conversation-batches');
+  for (const b of B.CONVERSATION_BATCHES) assert.strictEqual(seed[b.batch], read('migrations/' + b.file), `batch ${b.batch} lệch file SQL (chạy node scripts/build-conversation-seed.js)`);
+  const api = read('api/index.js'); const i = api.indexOf("app.post('/api/admin/conversations/import-batches'");
+  assert.ok(i > 0 && /requireAdmin\(actingUser, res\)/.test(api.slice(i, i + 500)) && /importConversationBatches\(\)/.test(api.slice(i, i + 800)));
+  const db = read('lib/db.js'); const j = db.indexOf('async function importConversationBatches');
+  assert.ok(/b\.status !== 'ok'/.test(db.slice(j, j + 900)) && /ROLLBACK/.test(db.slice(j, j + 1800)));
+  assert.ok(!/importConversationBatches/.test(db.slice(0, j).replace(/\/\/.*$/gm, '')), 'không hàm nào tự gọi nhập batch');
+});
+
+test('(12) importConversationBatches trên Postgres thật: DB trống → +200; gọi lại → +0 (không trùng); batch lẻ thiếu → chỉ bù phần thiếu, không đè chỉnh sửa tay', async () => {
+  const dbName = await newDb(); const origLoad = Module._load;
+  Module._load = function (request) {
+    if (STUB_MODULES.test(request)) return {};
+    if (request === 'pg') return { Pool: class { async connect() { return connectMini({ database: dbName }); } on() {} } };
+    return origLoad.apply(this, arguments);
+  };
+  const dbPath = path.join(ROOT, 'lib/db.js'); const old = process.env.DATABASE_URL; process.env.DATABASE_URL = 'postgresql://u:pw@localhost/x';
+  try {
+    delete require.cache[dbPath]; delete require.cache[schemaPath];
+    const D = require(dbPath); const probe = await conn(dbName);
+    assert.strictEqual((await D.getConversationDataReport()).presentTotal, 0, 'DB trống: cần nhập đủ 8 batch');
+    const r1 = await D.importConversationBatches();
+    assert.strictEqual(r1.added, 200); assert.deepStrictEqual(r1.imported.map((x) => x.batch), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.strictEqual(await count(probe, 'conversations'), 200);
+    assert.strictEqual((await D.getConversationGenOverview()).counts.pending, 200, 'bài ở trạng thái chờ → nút Sinh có việc để làm');
+    assert.deepStrictEqual(await D.pickConversationsForGen(1), ['hsk3-001']);
+    const r2 = await D.importConversationBatches(); assert.strictEqual(r2.added, 0); assert.deepStrictEqual(r2.imported, []);
+    // sửa tay 1 bài, xoá 1 bài của batch 3 → nhập lại chỉ bù bài thiếu, không đè bài đã sửa
+    await probe.query(`UPDATE conversations SET title_vi = 'ĐÃ SỬA TAY' WHERE dialogue_id = 'hsk3-001'; DELETE FROM conversations WHERE dialogue_id = 'hsk3-060'`);
+    const r3 = await D.importConversationBatches(); assert.strictEqual(r3.added, 1); assert.deepStrictEqual(r3.imported.map((x) => x.batch), [3]);
+    assert.strictEqual((await probe.query(`SELECT title_vi FROM conversations WHERE dialogue_id='hsk3-001'`)).rows[0].title_vi, 'ĐÃ SỬA TAY');
+    assert.strictEqual(await count(probe, 'conversations'), 200);
+    probe.end();
+  } finally { Module._load = origLoad; delete require.cache[dbPath]; delete require.cache[schemaPath]; if (old === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = old; }
+}, { db: true });
+
 // ── Chạy ──
 (async () => {
   try { const a = await admin(); await a.query('SELECT 1'); a.end(); adminOk = true; } catch (e) { adminOk = false; }

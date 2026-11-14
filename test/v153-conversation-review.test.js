@@ -100,6 +100,22 @@ test('LỖI "không thấy nút": API lỗi → admin THẤY lý do + nút Thử
   assert.strictEqual(L.els['convo-admin'].innerHTML, ''); assert.strictEqual(L.calls.length, 0);
 });
 
+test('V154 UI: DB thiếu hội thoại đầu bài → admin THẤY cảnh báo + nút nhập; bấm gọi đúng API, báo số bài; DB đủ thì không hiện; không bấm đúp', async () => {
+  const rep = (p) => ({ expectedTotal: 200, presentTotal: p, complete: p === 200, needBatches: p === 200 ? [] : [1, 2, 3, 4, 5, 6, 7, 8] });
+  let present = 0;
+  const E = uiEnv(true, (url, opts) => (/import-batches/.test(url) ? (present = 200, { ok: true, added: 200, imported: [] }) : Object.assign(OV({ pending: present }), { dataReport: rep(present) })));
+  E.els['convo-admin'] = { innerHTML: '' }; E.els['convo-gen-msg'] = { textContent: '' };
+  await E.ctx.loadConvoAdmin();
+  assert.ok(/0\/200/.test(E.els['convo-admin'].innerHTML) && /convoImportBatches\(\)/.test(E.els['convo-admin'].innerHTML) && /Nhập 200 hội thoại còn thiếu/.test(E.els['convo-admin'].innerHTML));
+  await Promise.all([E.ctx.convoImportBatches(), E.ctx.convoImportBatches()]);
+  assert.strictEqual(E.calls.filter((c) => /import-batches/.test(c.url)).length, 1, 'bấm đúp chỉ gửi 1 lần');
+  assert.ok(E.calls.some((c) => c.url === '/api/admin/conversations/import-batches' && c.opts.method === 'POST'));
+  assert.ok(!/convoImportBatches\(\)/.test(E.els['convo-admin'].innerHTML), 'đủ rồi thì ẩn cảnh báo');
+  assert.ok(/Đã nhập 200 hội thoại mới/.test(E.els['convo-gen-msg'].textContent));
+  const L = uiEnv(false, () => OV({})); L.els['convo-admin'] = { innerHTML: '' }; await L.ctx.loadConvoAdmin();
+  assert.strictEqual(L.calls.length, 0, 'người học thường không gọi gì');
+});
+
 test('hiện nút "Duyệt tất cả" khi ≥2 nháp; duyệt-hết gọi đúng API và báo số bài', async () => {
   const E = uiEnv(true, (url) => (/approve-all/.test(url) ? { ok: true, approved: 3 } : OV({ draft: 3 }, [])));
   E.els['convo-admin'] = { innerHTML: '' }; E.els['convo-gen-msg'] = { textContent: '' };
