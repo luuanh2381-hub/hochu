@@ -79,11 +79,11 @@ test('dạng gõ trong dự phòng vẫn bị cổng cứng chặn khi kỹ năn
 
 test('review.js: thẻ chính thức/check/drill dùng sentence-trước, từ-đơn-lẻ-sau; V138 vẫn ép dạng câu ở nhánh đầu', () => {
   const src = read('js/review.js');
-  assert.ok(/fsrsOnly: true, only: QE\.SENTENCE_ORDER/.test(src), 'nhánh câu vẫn còn (khớp test V138)');
+  assert.ok(/fsrsOnly \? \{ fsrsOnly: true, only: QE\.SENTENCE_ORDER \}/.test(src), 'nhánh câu vẫn còn');
   assert.ok(/QE\.WORD_FALLBACK_ORDER/.test(src), 'có dự phòng');
-  assert.ok(/if \(item\.type === 'check'\) return officialQ\(\)/.test(src));
-  assert.ok(/if \(item\.type === 'drill'\) return officialQ\(\)/.test(src));
-  assert.ok(/\n  return officialQ\(\);\n\}/.test(src), 'nhánh cuối (thẻ chính thức) dùng officialQ');
+  assert.ok(/if \(item\.type === 'check'\) return officialQ\(false\)/.test(src));
+  assert.ok(/if \(item\.type === 'drill'\) return officialQ\(false\)/.test(src));
+  assert.ok(/\n  return officialQ\(true\);\n\}/.test(src), 'nhánh cuối (thẻ chính thức) dùng officialQ(true) = fsrsOnly');
   assert.ok(!/rvQueue\.items\.splice\([^)]*official/.test(src), 'không chèn lại thẻ chính thức');
 });
 
