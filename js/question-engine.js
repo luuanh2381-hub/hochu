@@ -509,7 +509,13 @@ const QE = (function () {
       const hints = String(s.hint || '').split(/[、,，]/).map(t => t.trim()).filter(Boolean);
       if (hints.includes(word.hz)) out.push({ zh: s.hz, vi: s.vi || '', source: 'sentence' });
     }
-    return out.filter(s => countOccurrences(s.zh, word.hz) === 1 && s.zh.length <= 40);
+    // V164: cùng 1 câu chữ Hán xuất hiện nhiều lần (nhiều bản ghi) → gộp, giữ bản CÓ pinyin
+    const byZh = new Map();
+    for (const s of out) {
+      const cur = byZh.get(s.zh);
+      if (!cur || (!cur.py && s.py)) byZh.set(s.zh, s.py || !cur ? s : cur);
+    }
+    return [...byZh.values()].filter(s => countOccurrences(s.zh, word.hz) === 1 && s.zh.length <= 40);
   }
   function buildCloze(word, ctx) {
     const rand = ctx.rand || defaultRand;
