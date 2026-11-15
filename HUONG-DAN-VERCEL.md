@@ -29,11 +29,12 @@ Dùng **Neon** (dễ nhất, có gói free, tích hợp sẵn với Vercel):
 2. Chọn repo GitHub vừa tạo → Import.
 3. Ở phần **Environment Variables**, thêm:
    - `DATABASE_URL` = chuỗi kết nối Postgres ở Bước 1
-  - `AI_API_KEY` = API key của Vilao (https://api.vilao.ai/v1) — cần cho mọi tính năng AI văn bản
+  - `AI_API_KEY` = API key **OpenRouter** (tạo miễn phí tại https://openrouter.ai/keys) — cần cho mọi tính năng AI văn bản
     (luyện dịch, giải thích, sinh ví dụ, chiết tự...). Tuỳ chọn: `AI_BASE_URL` (mặc định
-    `https://api.vilao.ai/v1`), `AI_MODELS` (mặc định
-    `creq/deepseek-v4.1-flash-req,opc/deepseek-v4.1-flash,ubt/deepseek-v4.1-flash-1017` — thử lần lượt,
-    model lỗi thì tự chuyển sang model kế tiếp), `AI_MIN_INTERVAL_MS` (mặc định 1500)
+    `https://openrouter.ai/api/v1`), `AI_MODELS` (mặc định `openrouter/free` = OpenRouter tự chọn 1 model MIỄN PHÍ đang chạy được;
+    muốn cố định thì ghi model có hậu tố `:free`, nhiều model cách nhau dấu phẩy — thử lần lượt, lỗi thì chuyển model kế),
+    `AI_MIN_INTERVAL_MS` (mặc định 3500 — model free giới hạn khoảng 20 yêu cầu/phút và có hạn mức theo ngày; hết hạn mức thì
+    lượt chạy dừng và tiếp tục hôm sau). Biến `OPENROUTER_API_KEY` cũng được nhận thay cho `AI_API_KEY`.
   - **Ảnh gợi nhớ (V142)** — `CF_AI_TOKEN` = API token Cloudflare có quyền **Workers AI** (Cloudflare Dashboard →
     My Profile → API Tokens). `CF_ACCOUNT_ID` (tuỳ chọn, mặc định dùng `R2_ACCOUNT_ID`). Ảnh lưu vào cùng bucket R2
     (thư mục `img/v1/`), dùng model `@cf/black-forest-labs/flux-1-schnell` (tuỳ chọn đổi bằng `CF_AI_IMAGE_MODEL`,
@@ -42,7 +43,7 @@ Dùng **Neon** (dễ nhất, có gói free, tích hợp sẵn với Vercel):
     Admin: `GET /api/admin/word-images/status` (xem tiến độ + biến còn thiếu), `POST /api/admin/word-images/generate`
     (chạy tay, body tuỳ chọn `{"hz":["好"]}`), `POST /api/admin/word-images/reset` (xoá để tạo lại).
   - `GEMINI_API_KEY` = (không bắt buộc) chỉ cần cho chấm phát âm bằng ghi âm giọng nói, vì các model
-    DeepSeek chỉ xử lý văn bản
+    văn bản miễn phí của OpenRouter không nhận âm thanh
   - `CRON_SECRET` = 1 chuỗi bí mật tự đặt (vd 1 chuỗi random dài) — dùng để
     khoá endpoint sinh dữ liệu AI, tránh người lạ gọi tràn tốn tiền/quota
     Gemini của bạn. Không bắt buộc nhưng rất khuyến khích.
