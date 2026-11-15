@@ -187,7 +187,7 @@ const QE = (function () {
         `Câu hoàn chỉnh: ${extra.sentence.zh}`,
         extra.sentence.vi ? `Nghĩa: ${extra.sentence.vi}` : '',
         base,
-        'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
+        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : 'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
       ].filter(Boolean);
     }
     if (typeId === 'listen2hz' || typeId === 'listen2vi') return [`Bạn vừa nghe: ${base}`];
@@ -207,6 +207,7 @@ const QE = (function () {
       return [
         `Câu đúng: ${extra.order.zh}`,
         extra.order.vi ? `Nghĩa: ${extra.order.vi}` : '',
+        extra.order.py ? `Pinyin cả câu: ${extra.order.py}` : '',
         base,
       ].filter(Boolean);
     }
@@ -215,7 +216,7 @@ const QE = (function () {
         `Câu đầy đủ: ${extra.sentence.zh}`,
         extra.sentence.vi ? `Nghĩa cả câu: ${extra.sentence.vi}` : '',
         base,
-        'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
+        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : 'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
       ].filter(Boolean);
     }
     if (typeId === 'hz2py' || typeId === 'typeHz2py') return [`${word.hz} đọc là ${word.py} (${word.vi}).`];
