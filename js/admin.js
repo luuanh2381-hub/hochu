@@ -441,12 +441,14 @@ async function readExampleFile() {
   const wb = XLSX.read(buf, { type: 'array' });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
   if (!rows.length) throw new Error('File không có dữ liệu.');
-  return rows.map(r => ({
-    hz: String(r.hz ?? r['Chữ Hán'] ?? r['Từ'] ?? '').trim(),
-    zh: String(r.zh ?? r['Câu ví dụ'] ?? r['Câu'] ?? '').trim(),
-    vi: String(r.vi ?? r['Nghĩa'] ?? r['Dịch'] ?? '').trim(),
-    py: String(r.py ?? r.pinyin ?? r.Pinyin ?? r['Phiên âm'] ?? '').trim(),
-  }));
+  // V162: tiêu đề cột không phân biệt hoa/thường, dấu, khoảng trắng; chấp nhận py/pinyin/piyin/phiên âm...
+  const norm = k => String(k).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const ALIAS = { hz: ['hz', 'chuhan', 'tu'], zh: ['zh', 'cauvidu', 'cau'], vi: ['vi', 'nghia', 'dich'], py: ['py', 'pinyin', 'piyin', 'pinyi', 'phienam', 'phatam'] };
+  return rows.map(r => {
+    const m = {}; for (const k of Object.keys(r)) m[norm(k)] = r[k];
+    const get = f => { for (const a of ALIAS[f]) if (m[a] !== undefined && String(m[a]).trim() !== '') return String(m[a]).trim(); return ''; };
+    return { hz: get('hz'), zh: get('zh'), vi: get('vi'), py: get('py') };
+  });
 }
 function wexLines(list, key) {
   if (!list || !list.length) return '';

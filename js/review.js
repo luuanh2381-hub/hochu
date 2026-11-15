@@ -585,7 +585,14 @@ async function rvRelearnFromStart() {
 function rvFindExample(hz) {
   const matches = rvExamplePool.filter(e => e.hz === hz);
   if (!matches.length) return null;
-  return matches[Math.floor(Math.random() * matches.length)];
+  // V163: ưu tiên câu có pinyin (từ cột py của file ví dụ) để màn đáp án hiện đủ thông tin
+  const withPy = matches.filter(e => e.py && String(e.py).trim());
+  const pool = withPy.length ? withPy : matches;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+// V163: dòng pinyin của câu ví dụ (chỉ khi người học đang bật "Hiện Pinyin")
+function rvExPy(e) {
+  return (e && e.py && (typeof showPinyin === 'undefined' || showPinyin)) ? `<br><span class="rv-sent-py">${escapeHtml(e.py)}</span>` : '';
 }
 // V138 — câu CHỮ HÁN cần đọc sau khi trả lời (cả câu, không chỉ từ). Câu hỏi theo câu → câu thật của câu hỏi;
 // dạng cũ (nếu còn) → chữ Hán của từ. Dùng cho cả tự phát sau khi trả lời lẫn nút "Nghe lại câu".
@@ -1074,7 +1081,7 @@ function rvIntroHtml(tagLabel, w) {
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
       ${audioOk ? `<button id="rv-play" class="btn btn-sound btn-sm" onclick="speak('${escapeJsAttr(w.hz)}')">🔊 Nghe</button>` : ''}
       ${renderHanziParts(w.hz, false, true)}
-      ${ex ? `<div class="rv-ex">${escapeHtml(ex.zh)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(ex.vi || '')}</span></div>` : ''}
+      ${ex ? `<div class="rv-ex">${escapeHtml(ex.zh)}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(ex.vi || '')}</span></div>` : ''}
       <div style="text-align:center;margin-top:14px"><button class="btn btn-primary" onclick="rvIntroDone()">Đã xem — kiểm tra ngay</button></div>`;
 }
 
@@ -1281,7 +1288,7 @@ function renderReview() {
       ${renderHanziParts(w.hz, false, true)}
       ${rvExplainHtml()}
       ${rvAiHtml(w, r)}
-      ${(exD && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${escapeHtml(exD.zh)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span></div>` : ''}
+      ${(exD && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span></div>` : ''}
       <div style="text-align:center;margin-top:12px"><button class="btn btn-primary" onclick="rvPracticeContinue()">Tiếp tục</button></div>`;
   } else {
     // Đã có kết quả trắc nghiệm: lộ đáp án đầy đủ + bổ sung "Highlight System Rating" — hiện lại 4
@@ -1309,7 +1316,7 @@ function renderReview() {
       ${rvExplainHtml()}
       ${r && !r.correct ? rvCorrectionHtml(w, r) : ''}
       ${rvAiHtml(w, r)}
-      ${(ex && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${ex.zh}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span></div>` : ''}
+      ${(ex && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${ex.zh}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span></div>` : ''}
       ${rvRenderRatingBar()}
       ${savedLine}
       ${(isAdminRole() && r && r.autoRating) ? `<div class="rv-saved-line">🐞 debug: auto rating = ${r.autoRating}</div>` : ''}`;

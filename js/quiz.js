@@ -50,7 +50,10 @@ async function qzLoadSentencePool() {
 function qzFindExample(hz) {
   const matches = qzWordExamples.filter(e => e.hz === hz);
   if (matches.length === 0) return null;
-  return matches[Math.floor(Math.random() * matches.length)];
+  // V162: ưu tiên câu có pinyin (nếu từ có cả câu có và chưa có pinyin) để màn đáp án hiện đủ thông tin
+  const withPy = matches.filter(e => e.py && String(e.py).trim());
+  const pool = withPy.length ? withPy : matches;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function bindQuiz(forceReload) { _bindQuizAsync(forceReload); }
@@ -131,7 +134,7 @@ function qzRenderQ() {
   }
   const example = qzFindExample(w.hz);
   const exampleHtml = example
-    ? `<div style="font-size:.82rem;color:var(--muted);text-align:center;padding:0 12px 4px;line-height:1.5;">📖 <b style="color:var(--ink)">${example.zh.replace(w.hz, `<span style="color:var(--active-dark);font-weight:800">${w.hz}</span>`)}</b>${showMeaning ? `<br>${example.vi}` : ''}</div>`
+    ? `<div style="font-size:.82rem;color:var(--muted);text-align:center;padding:0 12px 4px;line-height:1.5;">📖 <b style="color:var(--ink)">${example.zh.replace(w.hz, `<span style="color:var(--active-dark);font-weight:800">${w.hz}</span>`)}</b>${example.py && showPinyin ? `<br><span style="color:var(--active)">${escapeHtml(example.py)}</span>` : ''}${showMeaning ? `<br>${example.vi}` : ''}</div>`
     : '';
   // Chỉ hiện chiết tự bộ thủ khi chữ Hán đã hiện sẵn trong câu hỏi (漢→Việt) — các chế độ khác
   // (Việt→漢, Âm→漢) chữ Hán chính là đáp án cần đoán, hiện chiết tự sẽ lộ đáp án.
