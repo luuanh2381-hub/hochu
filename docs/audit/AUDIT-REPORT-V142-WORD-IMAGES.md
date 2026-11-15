@@ -4,7 +4,7 @@
 Mỗi từ có thể có 1 ảnh minh hoạ + câu chuyện gợi nhớ tiếng Việt, sinh NỀN theo lô (không sinh lúc người học bấm).
 
 ## 2. Kiến trúc
-1. `lib/word-images.js`: model văn bản (`callGemini` = API văn bản qua Vilao, dùng chung hàng đợi `reserveGeminiSlot`) soạn `story_vi` + `image_prompt`
+1. `lib/word-images.js`: model văn bản (`callGemini` = API văn bản qua OpenRouter, dùng chung hàng đợi `reserveGeminiSlot`) soạn `story_vi` + `image_prompt`
    (từ nghĩa, Hán Việt, chiết tự) → FLUX.1 schnell (`CF_AI_TOKEN`) vẽ → kiểm tra magic bytes → R2 `img/v1/<2>/<sha256>.<ext>`.
 2. Neon `word_images` (tự tạo bảng): `drafting → prompted → generating → ready | failed`, tối đa 3 lần thử, hàng kẹt >120 s trả về hàng đợi,
    429 = hết hạn mức → dừng lượt, KHÔNG đánh dấu lỗi.
