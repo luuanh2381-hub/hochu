@@ -2865,8 +2865,11 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
       model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
-      max_tokens: (opts && opts.maxTokens) || 4096,
+      max_tokens: Math.min(16000, ((opts && opts.maxTokens) || 4096) * ((opts && opts._tokMul) || 1)),
       stream: false,
+      // V161: model free thường "suy nghĩ" trước và ngốn hết max_tokens → content rỗng (finish_reason: length).
+      // Yêu cầu suy luận ở mức thấp; model không hỗ trợ sẽ bỏ qua tham số này.
+      reasoning: { effort: 'low' },
     };
     if (useJsonMode) body.response_format = { type: 'json_object' };
     const payload = JSON.stringify(body);
@@ -2910,6 +2913,10 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
         const out = stripThink(json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content);
         if (!out) {
           const reason = json && json.choices && json.choices[0] && json.choices[0].finish_reason;
+          // V161: hết token mà chưa có nội dung → thử lại 1 lần với gấp đôi token (tối đa 16000)
+          if (reason === 'length' && !(opts && opts._tokMul)) {
+            return doCallAi(model, prompt, useJsonMode, Object.assign({}, opts, { _tokMul: 2, timeoutMs: Math.max((opts && opts.timeoutMs) || 25000, 60000) })).then(resolve, reject);
+          }
           return reject(new Error(`[${model}] AI không trả về nội dung (finish_reason: ${reason || 'không rõ'})`));
         }
         resolve(out);
