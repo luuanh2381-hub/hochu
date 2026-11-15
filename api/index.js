@@ -2739,18 +2739,21 @@ const https = require('https');
 // quota free tier cao hơn) mà không cần sửa code.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 
-// ── AI văn bản (sinh ví dụ, giải thích, dịch, chiết tự...) — dùng API tương thích OpenAI của Vilao ──
+// ── AI văn bản (sinh ví dụ, giải thích, dịch, chiết tự...) — dùng OpenRouter (API tương thích OpenAI), model MIỄN PHÍ ──
 // Biến môi trường:
-//   AI_API_KEY      (bắt buộc) — API key của Vilao
-//   AI_BASE_URL     (tuỳ chọn) — mặc định https://api.vilao.ai/v1
+//   AI_API_KEY      (bắt buộc) — API key OpenRouter (https://openrouter.ai/keys); cũng nhận OPENROUTER_API_KEY
+//   AI_BASE_URL     (tuỳ chọn) — mặc định https://openrouter.ai/api/v1
 //   AI_MODELS       (tuỳ chọn) — danh sách model, cách nhau bằng dấu phẩy; thử lần lượt từ trái sang phải,
 //                                model nào lỗi (quá tải/hết quota/không tồn tại) thì tự chuyển sang model kế tiếp.
-//   AI_MIN_INTERVAL_MS (tuỳ chọn) — giãn cách tối thiểu giữa 2 lần gọi, mặc định 1500ms.
-const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://api.vilao.ai/v1').replace(/\/+$/, '');
-const AI_MODELS = (process.env.AI_MODELS
-  || 'creq/deepseek-v4.1-flash-req,opc/deepseek-v4.1-flash,ubt/deepseek-v4.1-flash-1017')
+//                                Mặc định `openrouter/free` = bộ định tuyến tự chọn 1 model miễn phí đang chạy được (có lọc theo tính năng
+//                                cần dùng như JSON). Muốn cố định: ví dụ `meta-llama/llama-3.3-70b-instruct:free` (thêm hậu tố :free).
+//   AI_MIN_INTERVAL_MS (tuỳ chọn) — giãn cách tối thiểu giữa 2 lần gọi, mặc định 3500ms (model free giới hạn ~20 yêu cầu/phút).
+//   AI_SITE_URL / AI_SITE_NAME (tuỳ chọn) — gửi kèm header HTTP-Referer / X-Title theo khuyến nghị của OpenRouter.
+const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+const AI_MODELS = (process.env.AI_MODELS || 'openrouter/free')
   .split(',').map((m) => m.trim()).filter(Boolean);
-const AI_MIN_INTERVAL_MS = Number(process.env.AI_MIN_INTERVAL_MS) || 1500;
+const AI_MIN_INTERVAL_MS = Number(process.env.AI_MIN_INTERVAL_MS) || 3500;
+const aiApiKey = () => process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY || '';
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -2830,7 +2833,7 @@ async function callWithRetry(doFn, intervalMs = GEMINI_MIN_INTERVAL_MS) {
   throw lastErr;
 }
 
-// Gọi AI văn bản qua API OpenAI-compatible của Vilao. Giữ tên callGemini để KHÔNG phải sửa các nơi gọi.
+// Gọi AI văn bản qua OpenRouter (OpenAI-compatible, model miễn phí). Giữ tên callGemini để KHÔNG phải sửa các nơi gọi.
 // Thử lần lượt từng model trong AI_MODELS: lỗi tạm thời / hết quota / model không dùng được → sang model kế tiếp;
 // chỉ báo lỗi khi tất cả model đều lỗi (hoặc lỗi cấu hình như thiếu key, sai key).
 // V152: opts (tuỳ chọn) { maxTokens, timeoutMs } cho đầu ra dài (sinh hội thoại); không truyền → y hệt trước (4096 token, 25 giây).
@@ -2838,7 +2841,7 @@ function callGemini(prompt, opts) {
   return callWithRetry(() => callAiWithFallback(prompt, opts), AI_MIN_INTERVAL_MS);
 }
 async function callAiWithFallback(prompt, opts) {
-  if (!process.env.AI_API_KEY) throw new Error('Chưa cấu hình AI_API_KEY trên server');
+  if (!aiApiKey()) throw new Error('Chưa cấu hình AI_API_KEY (API key OpenRouter) trên server');
   let lastErr;
   for (const model of AI_MODELS) {
     try {
@@ -2855,7 +2858,7 @@ async function callAiWithFallback(prompt, opts) {
 function stripThink(t) { return String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim(); }
 function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.AI_API_KEY;
+    const apiKey = aiApiKey();
     let url;
     try { url = new URL(AI_BASE_URL + '/chat/completions'); } catch (e) { return reject(Object.assign(new Error('AI_BASE_URL không hợp lệ'), { fatal: true })); }
     const body = {
@@ -2877,6 +2880,8 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload),
         'Authorization': 'Bearer ' + apiKey,
+        'HTTP-Referer': process.env.AI_SITE_URL || 'https://hochu.vercel.app',
+        'X-Title': process.env.AI_SITE_NAME || 'Hochu',
       },
     };
     const reqq = lib.request(options, (resp) => {
@@ -2893,7 +2898,7 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
           const msg = (json && json.error && (json.error.message || json.error)) || json.message || `AI lỗi HTTP ${status}`;
           const text = typeof msg === 'string' ? msg : JSON.stringify(msg);
           // Proxy không hỗ trợ response_format → thử lại không dùng JSON mode (prompt vẫn yêu cầu JSON)
-          if (status === 400 && useJsonMode && /response_format|json_object|json mode/i.test(text)) {
+          if ((status === 400 || status === 404) && useJsonMode && /response_format|json_object|json mode|structured|No endpoints found/i.test(text)) {
             return doCallAi(model, prompt, false, opts).then(resolve, reject);
           }
           const err = new Error(`[${model}] HTTP ${status}: ${text}`);
@@ -4105,7 +4110,7 @@ if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`✅ Server đang chạy tại http://localhost:${PORT}`);
     if (!process.env.DATABASE_URL) console.log('   ⚠️  Chưa đặt DATABASE_URL');
-    if (!process.env.AI_API_KEY) console.log('   ⚠️  Chưa đặt AI_API_KEY (AI văn bản qua Vilao)');
+    if (!aiApiKey()) console.log('   ⚠️  Chưa đặt AI_API_KEY (AI văn bản qua OpenRouter)');
     if (!process.env.GEMINI_API_KEY) console.log('   ℹ️  Chưa đặt GEMINI_API_KEY (chỉ cần cho chấm phát âm bằng giọng nói)');
   });
 }
