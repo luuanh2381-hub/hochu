@@ -89,7 +89,8 @@
     "test:v156": "node test/v156-word-examples-file.test.js",
     "test:v157": "node test/v157-answer-audio.test.js",
     "test:v159": "node test/v159-example-prompt.test.js",
-    "test:v160": "node test/v160-openrouter.test.js"
+    "test:v160": "node test/v160-openrouter.test.js",
+    "test:v164": "node test/v164-py-duplicates.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",
