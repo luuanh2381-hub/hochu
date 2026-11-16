@@ -178,6 +178,12 @@ const QE = (function () {
     return { key: w.vi, label: w.vi, sub: null };
   }
 
+  // V165: nói rõ vì sao chưa có pinyin (câu lấy từ giáo trình, hay câu trong kho ví dụ nhưng cột py trống)
+  function noPyNote(sent) {
+    const src = sent && sent.source === 'sentence' ? ' (câu này lấy từ giáo trình, không phải từ file ví dụ)'
+      : sent && sent.source === 'example' ? ' (câu trong kho ví dụ nhưng cột py đang trống — hãy nhập lại file có cột py)' : '';
+    return 'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.' + src;
+  }
   function explain(typeId, word, extra) {
     const hv = word.hanviet ? ` · Hán Việt: ${word.hanviet}` : '';
     const base = `${word.hz} (${word.py || '—'}) = ${word.vi}${hv}`;
@@ -187,7 +193,7 @@ const QE = (function () {
         `Câu hoàn chỉnh: ${extra.sentence.zh}`,
         extra.sentence.vi ? `Nghĩa: ${extra.sentence.vi}` : '',
         base,
-        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : 'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
+        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : noPyNote(extra.sentence),
       ].filter(Boolean);
     }
     if (typeId === 'listen2hz' || typeId === 'listen2vi') return [`Bạn vừa nghe: ${base}`];
@@ -216,7 +222,7 @@ const QE = (function () {
         `Câu đầy đủ: ${extra.sentence.zh}`,
         extra.sentence.vi ? `Nghĩa cả câu: ${extra.sentence.vi}` : '',
         base,
-        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : 'Pinyin của cả câu: chưa có trong dữ liệu nên chưa hiển thị.',
+        extra.sentence.py ? `Pinyin cả câu: ${extra.sentence.py}` : noPyNote(extra.sentence),
       ].filter(Boolean);
     }
     if (typeId === 'hz2py' || typeId === 'typeHz2py') return [`${word.hz} đọc là ${word.py} (${word.vi}).`];
