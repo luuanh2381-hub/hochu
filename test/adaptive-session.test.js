@@ -396,7 +396,8 @@ test('Từ yếu nghe (có âm thanh) → buổi có câu nghe CẢ CÂU cho đ�
   const E = makeEnv();
   const a = item('review', '认真'); a.skillProfile = { recognition: { status: 'ok', score: 0.95, attempts: 10 }, recall: { status: 'ok', score: 0.9, attempts: 6 }, listening: { status: 'weak', score: 0.2, attempts: 6 }, pinyin: { status: 'ok', score: 0.9, attempts: 6 }, context: { status: 'ok', score: 0.9, attempts: 6 } };
   E.env.q.items = [a]; E.f.rvPrepareCurrentCard();
-  assert.strictEqual(E.env.question.typeId, 'listenSent2vi');
+  // V167: có 2 dạng nghe CẢ CÂU (→ nghĩa, → chọn câu chữ Hán) cùng kỹ năng 'nghe' — dạng nào cũng đúng ý của ca này
+  assert.ok(['listenSent2vi', 'listenSent2zh'].includes(E.env.question.typeId), 'dạng nghe cả câu, nhận được: ' + E.env.question.typeId);
 });
 test('Bài ghép cặp: hoàn tất ghi từng cặp (luyện bổ sung), không đổi tiến độ FSRS', () => {
   const E = makeEnv();

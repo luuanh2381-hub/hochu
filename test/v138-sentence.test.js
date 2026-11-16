@@ -44,7 +44,7 @@ const SENTENCES = [
 const POOL = [W, { hz: '公园', py: 'gōng yuán', vi: 'công viên', l: 1 }];
 function lcg(seed) { let s = seed; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; }
 const ctx = (extra) => Object.assign({ pool: POOL, examples: EXAMPLES, sentences: SENTENCES, audioOk: true, rand: lcg(7) }, extra || {});
-const SENT_TYPES = ['sent2vi', 'vi2sent', 'listenSent2vi', 'sentPick'];
+const SENT_TYPES = ['sent2vi', 'vi2sent', 'listenSent2vi', 'listenSent2zh', 'sentPick'];
 
 // ── Dạng câu mới ───────────────────────────────────────────────────────────────────────────
 test('4 dạng câu mới đều khai báo đúng: quizType sentence, đi đường FSRS + luyện bổ sung, cần câu ví dụ', () => {
@@ -123,7 +123,7 @@ test('Không có câu ví dụ → cả 4 dạng trả null (KHÔNG bịa câu, 
 });
 
 test('SENTENCE_ORDER chỉ gồm câu hỏi theo câu/điền từ và không có dạng từ đơn lẻ', () => {
-  assert.deepStrictEqual(QE.SENTENCE_ORDER, ['sent2vi', 'vi2sent', 'listenSent2vi', 'cloze', 'sentPick']);
+  assert.deepStrictEqual(QE.SENTENCE_ORDER, ['sent2vi', 'vi2sent', 'listenSent2vi', 'listenSent2zh', 'cloze', 'sentPick']); // V167: thêm listenSent2zh
   for (const t of QE.SENTENCE_ORDER) assert.ok(!['hz2vi', 'vi2hz', 'listen2hz', 'listen2vi', 'hz2py'].includes(t), t);
 });
 
@@ -139,8 +139,8 @@ test('Bộ chọn với SENTENCE_ORDER: không bao giờ trả trắc nghiệm t
 
 // ── Nhãn kỹ năng + chấm server ─────────────────────────────────────────────────────────────
 test('lib/skills: 8 nhãn câu hỏi theo câu khớp quizType sentence; nhãn sai chiều bị từ chối', () => {
-  const fsrs = { 'review-sent2vi': 'vi', 'review-vi2sent': 'zh', 'review-listen-sent': 'vi', 'review-sent-pick': 'zh' };
-  const prac = { 'practice-sent2vi': 'vi', 'practice-vi2sent': 'zh', 'practice-listen-sent': 'vi', 'practice-sent-pick': 'zh' };
+  const fsrs = { 'review-sent2vi': 'vi', 'review-vi2sent': 'zh', 'review-listen-sent': 'vi', 'review-listen-sent-zh': 'zh', 'review-sent-pick': 'zh' };
+  const prac = { 'practice-sent2vi': 'vi', 'practice-vi2sent': 'zh', 'practice-listen-sent': 'vi', 'practice-listen-sent-zh': 'zh', 'practice-sent-pick': 'zh' };
   for (const [k, f] of Object.entries(Object.assign({}, fsrs, prac))) {
     const ex = SK.resolveExercise(k, 'sentence');
     assert.ok(ex, k + ' phải hợp lệ');
