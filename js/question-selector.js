@@ -46,7 +46,7 @@ const QS = (function () {
     base: { hz2vi: 1.0, vi2hz: 1.0, listen2hz: 1.0, listen2vi: 1.0, hz2py: 0.9, cloze: 1.1, confusable: 0.8, listen2tone: 0.8, typeVi2hz: 0.9, typeHz2py: 0.9,
       py2hz: 0.95, py2vi: 0.95, vi2py: 0.95, hz2hv: 0.9, listen2type: 0.9, // V117: dạng bổ sung (chỉ luyện bổ sung)
       // V138: câu hỏi theo câu — thay trắc nghiệm từ đơn lẻ trong "Hôm nay học".
-      sent2vi: 1.1, vi2sent: 1.0, listenSent2vi: 1.0, sentPick: 0.9 },
+      sent2vi: 1.1, vi2sent: 1.0, listenSent2vi: 1.0, listenSent2zh: 1.0, sentPick: 0.9 },
     // V110 — câu TỰ NHẬP là "độ khó tăng dần": chỉ ưu tiên khi người học đã VỮNG kỹ năng đó ở dạng trắc nghiệm.
     typedMasteryBonus: 1.8, typedMinAttempts: 4,           // kỹ năng 'tốt' (≥0.75) và ≥ 4 lượt → cộng
     typedDevelopingPenalty: 0.6, typedNotReadyPenalty: 2.5, // đang phát triển → trừ nhẹ; yếu/thiếu dữ liệu → gần như không gõ

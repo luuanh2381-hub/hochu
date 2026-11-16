@@ -80,6 +80,8 @@ const QE = (function () {
     sent2vi:      { id: 'sent2vi',      label: 'Câu → Nghĩa',          skill: 'context',   quizType: 'sentence', answerField: 'vi', sentenceField: 'vi', sentence: true, exerciseFsrs: 'review-sent2vi',      exercisePractice: 'practice-sent2vi',      needsExample: true },
     vi2sent:      { id: 'vi2sent',      label: 'Nghĩa → Câu',          skill: 'context',   quizType: 'sentence', answerField: 'zh', sentenceField: 'zh', sentence: true, exerciseFsrs: 'review-vi2sent',      exercisePractice: 'practice-vi2sent',      needsExample: true },
     listenSent2vi: { id: 'listenSent2vi', label: 'Nghe câu → Nghĩa',   skill: 'listening', quizType: 'sentence', answerField: 'vi', sentenceField: 'vi', sentence: true, exerciseFsrs: 'review-listen-sent',  exercisePractice: 'practice-listen-sent',  needsExample: true, needsAudio: true },
+    // V167: NGHE CÂU → CHỌN CÂU CHỮ HÁN ĐÚNG (đề chỉ có âm thanh; 4 lựa chọn là 4 câu chữ Hán). Nhãn FSRS CHÍNH THỨC → đổi lịch ôn, tính kỹ năng 'listening'.
+    listenSent2zh: { id: 'listenSent2zh', label: 'Nghe câu → Chọn câu',  skill: 'listening', quizType: 'sentence', answerField: 'zh', sentenceField: 'zh', sentence: true, exerciseFsrs: 'review-listen-sent-zh', exercisePractice: 'practice-listen-sent-zh', needsExample: true, needsAudio: true },
     sentPick:     { id: 'sentPick',     label: 'Chọn câu có dùng từ',  skill: 'context',   quizType: 'sentence', answerField: 'zh', sentenceField: 'zh', sentence: true, exerciseFsrs: 'review-sent-pick',    exercisePractice: 'practice-sent-pick',    needsExample: true },
   };
   const MCQ_ORDER = ['hz2vi', 'vi2hz', 'listen2hz', 'listen2vi', 'hz2py', 'cloze']; // thứ tự ưu tiên khi hoà điểm
@@ -95,7 +97,7 @@ const QE = (function () {
   // V138: câu hỏi THEO CÂU cho thẻ FSRS chính thức (và câu kiểm tra/luyện thêm). Thứ tự ưu tiên khi hoà điểm;
   // dạng nào không dựng được (từ chưa có câu ví dụ) thì bộ chọn thử dạng kế tiếp, hết thì trả null (KHÔNG rơi về
   // trắc nghiệm từ đơn lẻ). `cloze` cũng là câu hỏi theo câu nên nằm trong danh sách này.
-  const SENTENCE_ORDER = ['sent2vi', 'vi2sent', 'listenSent2vi', 'cloze', 'sentPick'];
+  const SENTENCE_ORDER = ['sent2vi', 'vi2sent', 'listenSent2vi', 'listenSent2zh', 'cloze', 'sentPick'];
   // V150: dạng TỪ ĐƠN LẺ có nhãn FSRS chính thức — chỉ dùng làm dự phòng khi từ chưa có câu ví dụ (không dựng được SENTENCE_ORDER).
   // Thứ tự = ưu tiên khi hoà điểm. 'cloze' không nằm ở đây (cần câu). Dạng gõ vẫn bị cổng cứng của QS.rank chặn nếu chưa đủ vững.
   const WORD_FALLBACK_ORDER = ['hz2vi', 'vi2hz', 'listen2vi', 'listen2hz', 'hz2py', 'typeVi2hz', 'typeHz2py'];
@@ -651,6 +653,18 @@ const QE = (function () {
     const placed = placeCorrect({ key: s.vi, label: s.vi, sub: null }, ds.map(d => ({ key: d.vi, label: d.vi, sub: null })), ctx);
     return assembleSentence('listenSent2vi', word, ctx, { kind: 'audio', audioText: s.zh, ask: 'Nghe cả câu và chọn nghĩa đúng' }, placed, s);
   }
+  // V167: Nghe CẢ CÂU → chọn đúng CÂU CHỮ HÁN vừa nghe. Đề không hiện chữ; nhiễu là câu thật khác (không trùng, không chứa nguyên câu đáp án).
+  function buildListenSent2Zh(word, ctx) {
+    if (!ctx.audioOk) return null;
+    const sents = candSentences(word, ctx, true);
+    if (!sents.length) return null;
+    const rand = ctx.rand || defaultRand;
+    const s = sents[Math.floor(rand() * sents.length)];
+    const ds = pickSentDistractors(s, ctx, 3, 'zh');
+    if (ds.length < 3) return null;
+    const placed = placeCorrect({ key: s.zh, label: s.zh, sub: null }, ds.map(d => ({ key: d.zh, label: d.zh, sub: null })), ctx);
+    return assembleSentence('listenSent2zh', word, ctx, { kind: 'audio', audioText: s.zh, ask: 'Nghe cả câu và chọn câu đúng' }, placed, s);
+  }
   // Chọn câu CÓ dùng từ đang học (đúng 1 đáp án): nhiễu là câu thật KHÔNG chứa từ này.
   function buildSentPick(word, ctx) {
     const sents = candSentences(word, ctx, false);
@@ -723,7 +737,7 @@ const QE = (function () {
     hz2tone: buildHz2Tone, hv2vi: buildHv2Vi, hv2hz: buildHv2Hz, vi2hv: buildVi2Hv,
     duelHz2vi: buildDuelHz2Vi, duelVi2hz: buildDuelVi2Hz, duelHz2py: buildDuelHz2Py,
     tfHz2vi: buildTfHz2Vi, tfVi2hz: buildTfVi2Hz, tfHz2py: buildTfHz2Py,
-    sent2vi: buildSent2Vi, vi2sent: buildVi2Sent, listenSent2vi: buildListenSent2Vi, sentPick: buildSentPick };
+    sent2vi: buildSent2Vi, vi2sent: buildVi2Sent, listenSent2vi: buildListenSent2Vi, listenSent2zh: buildListenSent2Zh, sentPick: buildSentPick };
 
   // ── Kiểm tra hợp lệ (dùng cả trong build và trong test) ────────────────────────────────────
   function validateTyped(q) {
