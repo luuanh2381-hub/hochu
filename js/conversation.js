@@ -573,6 +573,26 @@ async function loadConvoAdmin() {
     ? `<div class="cv-admin cv-admin-bad">Database mới có <strong>${dr.presentTotal | 0}/${dr.expectedTotal | 0}</strong> hội thoại đầu bài (thiếu batch ${(dr.needBatches || []).join(', ')}). Chưa có bài thì chưa thể sinh lượt thoại.
          <div class="cv-admin-row"><button type="button" class="cv-btn cv-btn-primary" id="convo-import-btn" onclick="convoImportBatches()">📥 Nhập ${(dr.expectedTotal | 0) - (dr.presentTotal | 0)} hội thoại còn thiếu</button></div></div>`
     : '';
+  // V166: nhập hội thoại từ file ngoài (.xlsx/.csv, mỗi dòng 1 lượt)
+  const importBox = `<div class="cv-admin-row"><button type="button" class="cv-btn" id="convo-file-toggle" onclick="convoToggleFileBox()">📄 Nhập hội thoại từ file (.xlsx / .csv) ${convoFileOpen ? '▴' : '▾'}</button></div>
+    <div class="cv-admin" id="convo-file-box"${convoFileOpen ? '' : ' hidden'}>
+      <div class="cv-admin-meta">Mỗi DÒNG = 1 lượt thoại. Cột: dialogue_id, title_zh, title_vi, hsk_level (HSK 3/4), topic, situation, characters (thông tin bài — chỉ điền ở dòng đầu mỗi bài) và turn, character, zh, py, vi, vocab, grammar. Tối thiểu 12 lượt/bài.</div>
+      <div class="cv-admin-row">
+        <input type="file" id="convo-file-input" accept=".xlsx,.xls,.csv" onchange="convoFileResult('')">
+        <button type="button" class="cv-btn" onclick="convoDownloadTemplate()">⬇️ Tải file mẫu</button>
+      </div>
+      <div class="cv-admin-row">
+        <label><input type="checkbox" id="convo-file-ready"> Đăng ngay cho người học (bỏ chọn = lưu nháp, chờ duyệt)</label>
+      </div>
+      <div class="cv-admin-row">
+        <label><input type="checkbox" id="convo-file-overwrite"> Ghi đè bài đã có (thay TOÀN BỘ lượt thoại)</label>
+      </div>
+      <div class="cv-admin-row">
+        <button type="button" class="cv-btn" onclick="convoImportFile(true)">🔍 Kiểm tra trước</button>
+        <button type="button" class="cv-btn cv-btn-primary" id="convo-file-btn" onclick="convoImportFile(false)">📥 Nhập</button>
+      </div>
+      <div id="convo-file-result" class="cv-msg" role="status"></div>
+    </div>`;
   live.innerHTML = `<div class="cv-stats">
       <div class="cv-stat"><b>${c.pending | 0}</b><span>Chờ sinh</span></div>
       <div class="cv-stat"><b>${c.draft | 0}</b><span>Nháp</span></div>
@@ -586,6 +606,7 @@ async function loadConvoAdmin() {
       ${c.draft > 1 ? `<button type="button" class="cv-btn" onclick="convoApproveAll(${c.draft | 0})">✅ Duyệt tất cả (${c.draft | 0})</button>` : ''}
     </div>
     ${missingBox}
+    ${importBox}
     <div id="convo-gen-msg" class="cv-msg" role="status"></div>
     <div class="cv-seg" role="tablist" aria-label="Trạng thái">${tabs}</div>
     <div class="cv-rows">${shown.length ? shown.map(row).join('') : '<div class="cv-empty">Không có bài nào ở trạng thái này.</div>'}</div>`;
@@ -694,6 +715,77 @@ async function convoApproveAll(n) {
   if (!r.ok) { convoGenMsg('⚠️ ' + (r.error || 'Không duyệt được')); return; }
   await loadConvoAdmin();
   convoGenMsg(`✅ Đã duyệt ${r.approved | 0} bài.`);
+}
+
+// ── V166: nhập hội thoại từ file ngoài ─────────────────────────────────────────────────────────
+let convoFileOpen = false;
+let convoFileBusy = false;
+function convoToggleFileBox() {
+  convoFileOpen = !convoFileOpen;
+  const box = document.getElementById('convo-file-box'); if (box) box.hidden = !convoFileOpen;
+  const t = document.getElementById('convo-file-toggle'); if (t) t.textContent = '📄 Nhập hội thoại từ file (.xlsx / .csv) ' + (convoFileOpen ? '▴' : '▾');
+}
+function convoFileResult(html) { const el = document.getElementById('convo-file-result'); if (el) el.innerHTML = html || ''; }
+
+async function convoDownloadTemplate() {
+  const r = await convoRequest('GET', '/admin/conversations/import-template');
+  if (!r.ok) { convoFileResult('⚠️ ' + escapeHtml(r.error || 'Không tải được file mẫu')); return; }
+  const ws = XLSX.utils.json_to_sheet(r.rows, { header: r.columns });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Hội thoại');
+  XLSX.writeFile(wb, 'mau-hoi-thoai.xlsx');
+}
+
+async function convoReadFile() {
+  const input = document.getElementById('convo-file-input');
+  const file = input && input.files && input.files[0];
+  if (!file) throw new Error('Chưa chọn file.');
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+  if (!rows.length) throw new Error('File không có dữ liệu.');
+  return rows;
+}
+
+function convoImportSummary(d) {
+  const L = [];
+  const lines = (arr) => arr.length ? `<ul style="margin:4px 0 0;padding-left:18px;font-size:.76rem;color:var(--muted);">${arr.map((x) => `<li>${escapeHtml(x)}</li>`).join('')}</ul>` : '';
+  const ICON = { added: '✅ Thêm mới', replaced: '♻️ Ghi đè', would_add: '➕ Sẽ thêm', would_replace: '♻️ Sẽ ghi đè', exists: '↷ Đã có — bỏ qua', invalid: '❌ Lỗi — không nhập' };
+  for (const x of d.results || []) {
+    const warn = x.warningCount ? ` · ${x.warningCount} cảnh báo` : '';
+    L.push(`<div style="margin-top:6px;"><b>${escapeHtml(x.dialogueId)}</b> — ${ICON[x.status] || escapeHtml(x.status)} · ${x.turns | 0} lượt${warn}`
+      + (x.status === 'invalid' ? lines(x.errors || []) : lines(x.warnings || [])) + '</div>');
+  }
+  const head = d.dryRun
+    ? `🔍 Kiểm tra trước (chưa ghi gì): sẽ thêm <b>${d.wouldAdd | 0}</b>, ghi đè <b>${d.wouldReplace | 0}</b>, bỏ qua <b>${d.exists | 0}</b>, lỗi <b>${d.invalid | 0}</b>.`
+    : `✅ Đã thêm <b>${d.added | 0}</b>, ghi đè <b>${d.replaced | 0}</b>, bỏ qua <b>${d.exists | 0}</b> bài đã có, lỗi (không nhập) <b>${d.invalid | 0}</b>. Trạng thái: <b>${d.status === 'ready' ? 'đã đăng' : 'nháp — vào tab "Nháp" để duyệt'}</b>.`;
+  return head + L.join('');
+}
+
+async function convoImportFile(dryRun) {
+  if (convoFileBusy) return;
+  const ready = !!(document.getElementById('convo-file-ready') || {}).checked;
+  const overwrite = !!(document.getElementById('convo-file-overwrite') || {}).checked;
+  if (!dryRun && overwrite && !confirm('Ghi đè sẽ THAY TOÀN BỘ lượt thoại của các bài đã có trong file (tiến độ nghe của người học được đặt lại). Tiếp tục?')) return;
+  convoFileBusy = true;
+  const btn = document.getElementById('convo-file-btn'); if (btn) btn.disabled = true;
+  try {
+    const rows = await convoReadFile();
+    convoFileResult(dryRun ? `Đang kiểm tra ${rows.length} dòng…` : `Đang nhập ${rows.length} dòng…`);
+    const r = await convoRequest('POST', '/admin/conversations/import-file', { rows, dryRun: !!dryRun, status: ready ? 'ready' : 'draft', overwrite });
+    if (!r.ok) { convoFileResult('❌ ' + escapeHtml(r.error || 'Không nhập được')); return; }
+    convoFileResult(convoImportSummary(r));
+    if (!dryRun) {
+      const inp = document.getElementById('convo-file-input'); if (inp) inp.value = '';
+      const keep = document.getElementById('convo-file-result').innerHTML;
+      await loadConvoAdmin();
+      convoFileOpen = true;
+      const box = document.getElementById('convo-file-box'); if (box) box.hidden = false;
+      convoFileResult(keep);
+    }
+  } catch (e) {
+    convoFileResult('❌ ' + escapeHtml((e && e.message) || 'Lỗi'));
+  } finally { convoFileBusy = false; const b = document.getElementById('convo-file-btn'); if (b) b.disabled = false; }
 }
 
 // Duyệt rồi nhảy sang bản nháp kế tiếp (xem-duyệt liên tục)
