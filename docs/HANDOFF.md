@@ -217,3 +217,10 @@ Mục lục báo cáo audit: `docs/audit/INDEX.md`.
 ## V160 — Thay Vilao/DeepSeek bằng OpenRouter (model free)
 - `api/index.js`: `AI_BASE_URL` mặc định `https://openrouter.ai/api/v1`, `AI_MODELS` mặc định `openrouter/free`, giãn cách gọi 3500ms (free ~20 req/phút), key đọc từ `AI_API_KEY` hoặc `OPENROUTER_API_KEY`, gửi header `HTTP-Referer`/`X-Title`; nếu model free không hỗ trợ JSON mode (400/404) thì tự gọi lại không JSON mode. Tên hàm `callGemini` và mọi nơi gọi giữ nguyên.
 - Đổi trên Vercel: đặt `AI_API_KEY` = key OpenRouter (xoá `AI_BASE_URL`/`AI_MODELS` cũ của Vilao nếu đã đặt, vì chúng ghi đè mặc định mới). Test: `npm run test:v160`.
+
+## V166 — Nhập hội thoại từ file ngoài (.xlsx/.csv)
+- Màn Duyệt hội thoại (admin) có nút "📄 Nhập hội thoại từ file": chọn file → "Kiểm tra trước" (không ghi) → "Nhập". Có file mẫu tải về (nguồn: `templateRows()` trong `lib/conversation-import.js`, route `GET /api/admin/conversations/import-template`).
+- Định dạng: mỗi DÒNG = 1 lượt. Thông tin bài (dialogue_id, title_zh, title_vi, hsk_level 3/4, topic, situation, characters) chỉ cần ở dòng đầu mỗi bài; dòng trống dialogue_id nối tiếp bài trên. Cột lượt: turn, character, zh, py, vi, vocab (`hz|py|nghĩa; ...`), grammar (`mẫu|ghi chú; ...`). Tiêu đề cột không phân biệt hoa/thường/dấu.
+- `lib/conversation-import.js` (thuần): LỖI chặn bài = thiếu trường, HSK ≠ 3/4, <12 lượt (CHECK V152), trùng số lượt, id sai. CẢNH BÁO (vẫn nhập) = pinyin lệch số chữ Hán, chữ số/Latin trong zh, vocab không nằm trong câu — dùng đúng luật `validateTurnEdit` của bài AI soạn.
+- `importConversationsFromFile` (lib/db.js): 1 transaction, chèn lượt theo lô; mặc định LƯU NHÁP (chờ duyệt), tuỳ chọn "Đăng ngay"; bài đã có → BỎ QUA, chỉ thay khi tick "Ghi đè" (đặt lại last_played_turn). `POST /api/admin/conversations/import-file {rows, dryRun, status, overwrite}`; tối đa 5000 dòng / 100 bài mỗi lần. Không gọi AI.
+- Test: `npm run test:v166` (6 test thuần + 1 test Postgres thật).
