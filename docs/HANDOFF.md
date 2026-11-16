@@ -224,3 +224,9 @@ Mục lục báo cáo audit: `docs/audit/INDEX.md`.
 - `lib/conversation-import.js` (thuần): LỖI chặn bài = thiếu trường, HSK ≠ 3/4, <12 lượt (CHECK V152), trùng số lượt, id sai. CẢNH BÁO (vẫn nhập) = pinyin lệch số chữ Hán, chữ số/Latin trong zh, vocab không nằm trong câu — dùng đúng luật `validateTurnEdit` của bài AI soạn.
 - `importConversationsFromFile` (lib/db.js): 1 transaction, chèn lượt theo lô; mặc định LƯU NHÁP (chờ duyệt), tuỳ chọn "Đăng ngay"; bài đã có → BỎ QUA, chỉ thay khi tick "Ghi đè" (đặt lại last_played_turn). `POST /api/admin/conversations/import-file {rows, dryRun, status, overwrite}`; tối đa 5000 dòng / 100 bài mỗi lần. Không gọi AI.
 - Test: `npm run test:v166` (6 test thuần + 1 test Postgres thật).
+
+## V167 — Dạng mới "Nghe câu → Chọn câu" (FSRS chính thức) ở "Hôm nay học"
+- `listenSent2zh` (js/question-engine.js): đề chỉ có ÂM THANH cả câu (không hiện chữ); 4 lựa chọn là 4 câu chữ Hán (nhiễu = câu thật khác). Cùng nhóm với `listenSent2vi` (nghe → chọn nghĩa) nhưng đáp án là câu chữ Hán → luyện nhận ra câu bằng tai.
+- CHÍNH THỨC: nhãn `review-listen-sent-zh` (lib/skills.js, `fsrs:true`, kỹ năng listening, sentField zh) → đổi lịch ôn như các câu hỏi theo câu khác; luyện thêm dùng `practice-listen-sent-zh`. Server vẫn tự tra câu thật rồi chấm (resolveSentenceAnswer) — không tin client.
+- Nằm trong `SENTENCE_ORDER`, trọng số 1.0 (js/question-selector.js). Chỉ dựng khi máy có giọng đọc (`audioOk`) + từ có ≥1 câu ví dụ + đủ 3 câu nhiễu; không thì bỏ qua (không bịa, không rơi về từ đơn). Cùng kỹ năng với `listenSent2vi` nên hai dạng thay phiên nhau nhờ luân phiên dạng trong buổi.
+- Test: `npm run test:v167`; đã cập nhật `v138-sentence` (SENTENCE_ORDER + bảng nhãn) và `adaptive-session` (case 5 chấp nhận cả 2 dạng nghe cả câu).
