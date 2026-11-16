@@ -35,10 +35,17 @@ test('db THẬT: cùng (hz, zh) có 2 bản ghi, 1 có py 1 không → API trả
       assert.strictEqual(got.length, 1, 'mỗi (hz, zh) chỉ 1 dòng');
       assert.strictEqual(got[0].py, 'Duōshù rén dōu tóngyì zhège bànfǎ.', 'ưu tiên bản có pinyin');
     }
+    // V165: 1 chữ = 1 ví dụ cho màn học — thêm câu thứ 2 (không py, mới hơn) và câu thứ 3 (có py, cũ hơn) → vẫn chỉ trả 1 câu CÓ py
+    await probe.query(`INSERT INTO word_examples (hz, lesson, vi, zh) VALUES ('多数', 4, 'AI sinh', '这里多数是新的。')`);
+    await D.importWordExamples([{ hz: '多数', zh: '他们多数是学生。', vi: 'Phần lớn họ là học sinh.', py: 'Tāmen duōshù shì xuéshēng.' }]);
+    await probe.query(`INSERT INTO word_examples (hz, lesson, vi, zh) VALUES ('多数', 4, 'AI sinh 2', '多数时候我在家。')`);
+    const one = await D.getWordExamplesForLessons([4]);
+    assert.strictEqual(one.length, 1, '1 chữ = 1 ví dụ');
+    assert.ok(one[0].py, 'ví dụ trả về phải là câu có pinyin');
     // nhập lại file → bổ sung py cho bản còn thiếu (trước đây bị bỏ qua vì "đã có pinyin")
     const r = await D.importWordExamples([{ hz: '多数', zh: '多数人都同意这个办法。', vi: 'x', py: 'Duōshù rén dōu tóngyì zhège bànfǎ.' }]);
     assert.strictEqual(r.updatedPinyin, 1);
-    assert.strictEqual((await probe.query(`SELECT COUNT(*)::int n FROM word_examples WHERE py IS NULL OR py = ''`)).rows[0].n, 0);
+    assert.strictEqual((await probe.query(`SELECT COUNT(*)::int n FROM word_examples WHERE zh = '多数人都同意这个办法。' AND (py IS NULL OR py = '')`)).rows[0].n, 0);
     probe.end();
   } finally { Module._load = origLoad; delete require.cache[dbPath]; if (old === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = old; }
 }, true);
