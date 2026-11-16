@@ -25,8 +25,10 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
   countConversationsGeneratedToday, approveAllConversationDrafts, updateConversationTurn, getVocabStatusByHz, addConversationVocabToLesson, // V153
   getConversationSchemaStatus, getConversationDataReport, importConversationBatches, // V154
+  importConversationsFromFile, // V166
 } = require('../lib/db');
 const conversationGen = require('../lib/conversation-gen'); // V152
+const conversationImport = require('../lib/conversation-import'); // V166: nhập hội thoại từ file
 const { schemaErrorResponse } = require('../lib/conversation-schema'); // V154: lỗi lược đồ hội thoại có phân loại
 const { getFsrsVerificationInfo } = require('../lib/fsrs');
 // V69: mọi review + toàn bộ analytics/optimizer/personal-retention giờ đi qua lib/fsrs/ (scheduler
@@ -3952,6 +3954,32 @@ app.post('/api/admin/conversations/import-batches', async (req, res) => {
     const out = await importConversationBatches();
     logActivity(authed.username, actingUser.role, 'conversation', `Nhập dữ liệu hội thoại: thêm ${out.added} bài từ batch ${out.imported.map((x) => x.batch).join(',') || '(không có)'}`);
     res.json({ ok: true, ...out });
+  } catch (e) { convoFail(res, e); }
+});
+
+app.get('/api/admin/conversations/import-template', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  if (!requireAdmin(authed.db.users[authed.username], res)) return;
+  res.json({ ok: true, columns: conversationImport.TEMPLATE_COLUMNS, rows: conversationImport.templateRows() });
+});
+
+// V166: NHẬP HỘI THOẠI TỪ FILE (.xlsx/.csv, mỗi dòng 1 lượt). body: { rows, dryRun, status: 'ready'|'draft', overwrite }.
+// Luôn kiểm tra trước; bài còn lỗi không bao giờ được ghi; bài đã có chỉ bị thay khi overwrite=true. Không gọi AI.
+app.post('/api/admin/conversations/import-file', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  const actingUser = authed.db.users[authed.username];
+  if (!requireAdmin(actingUser, res)) return;
+  try {
+    const body = req.body || {};
+    const parsed = conversationImport.parseConversationRows(body.rows);
+    if (parsed.fileErrors.length) return res.status(400).json({ ok: false, error: parsed.fileErrors.join(' · '), fileErrors: parsed.fileErrors });
+    const out = await importConversationsFromFile(parsed.dialogues, { dryRun: !!body.dryRun, status: body.status === 'ready' ? 'ready' : 'draft', overwrite: !!body.overwrite });
+    if (!out.dryRun && (out.added || out.replaced)) {
+      logActivity(authed.username, actingUser.role, 'conversation', `Nhập hội thoại từ file: thêm ${out.added}, ghi đè ${out.replaced}, bỏ qua ${out.exists}, lỗi ${out.invalid} (${out.status})`);
+    }
+    res.json({ ok: true, ...out, rowCount: parsed.rowCount });
   } catch (e) { convoFail(res, e); }
 });
 
