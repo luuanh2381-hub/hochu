@@ -215,6 +215,34 @@ function rvPracticeSource(item) {
   if (item.type === 'match') return 'match';
   return 'extra'; // extra / drill
 }
+// V168 — CHẾ ĐỘ HỌC (js/study-modes.js): bộ dạng đề CHÍNH THỨC (FSRS) do người học chọn ở màn bắt đầu / Cài đặt học.
+// Chế độ chỉ đổi DẠNG ĐỀ; thứ tự và danh tính thẻ đến hạn vẫn do FSRS + server quyết định, server vẫn tự chấm.
+function rvAudioOk() { return (typeof skillAudioAvailable === 'function') && skillAudioAvailable(); }
+function rvStudyMode() {
+  try {
+    if (typeof SMODE === 'undefined' || typeof swPrefs === 'undefined' || !swPrefs) return 'mix';
+    const id = SMODE.normalize(swPrefs.mode);
+    return SMODE.available(id, rvAudioOk()) ? id : 'mix'; // chế độ nghe bị khoá khi máy không có giọng đọc → về Tổng hợp
+  } catch { return 'mix'; }
+}
+function rvSetMode(id) {
+  if (typeof SMODE === 'undefined' || typeof swSetPref !== 'function') return;
+  if (!SMODE.available(SMODE.normalize(id), rvAudioOk())) return;
+  swSetPref('mode', SMODE.normalize(id));
+  if (typeof render === 'function') render();
+}
+function rvModePickerHtml() {
+  if (typeof SMODE === 'undefined') return '';
+  const cur = rvStudyMode(), audioOk = rvAudioOk();
+  const cards = SMODE.list().map((m) => {
+    const locked = !SMODE.available(m.id, audioOk);
+    return `<button type="button" class="rv-mode${m.id === cur ? ' on' : ''}" ${locked ? 'disabled' : ''} aria-pressed="${m.id === cur}" onclick="rvSetMode('${m.id}')">
+      <span class="rv-mode-t">${m.icon} ${escapeHtml(m.label)}</span>
+      <span class="rv-mode-d">${locked ? 'Máy chưa có giọng đọc nên chưa dùng được chế độ này.' : escapeHtml(m.desc)}</span>
+    </button>`;
+  }).join('');
+  return `<div class="rv-mode-wrap"><div class="rv-start-lbl" style="text-align:left;margin-bottom:6px">Chế độ học · mọi câu đều là thẻ chính thức tính vào lịch ôn FSRS</div><div class="rv-mode-grid">${cards}</div></div>`;
+}
 function rvSentenceTypes(skill) { return QE.SENTENCE_ORDER.filter(t => QE.TYPES[t].skill === skill); } // V138: chỉ còn câu hỏi theo câu
 function rvBuildQuestionFor(item) {
   // V111: từ hay nhầm (server) → QE chèn đáp án từng nhầm làm đáp án nhiễu; `remaining` = số thẻ chính thức còn lại → bộ chọn
@@ -238,7 +266,19 @@ function rvBuildQuestionFor(item) {
   }
   // V150: thẻ chính thức / kiểm tra / drill — ưu tiên câu hỏi theo câu; TỪ CHƯA CÓ CÂU VÍ DỤ → rơi về dạng từ đơn lẻ có nhãn FSRS
   // (QE.WORD_FALLBACK_ORDER) thay vì bị bỏ khỏi buổi. Dạng gõ vẫn qua cổng cứng của bộ chọn (chỉ khi kỹ năng đã vững + bật gõ).
+  // V168: nếu người học chọn một CHẾ ĐỘ HỌC (khác Tổng hợp) → hỏi bằng các dạng của chế độ đó (đều là dạng chính thức). Không dựng được
+  // (vd từ chưa có câu ví dụ mà chế độ toàn câu) → trả null để rơi về cách chọn mặc định bên dưới (không bỏ thẻ).
+  const modeQ = (fsrsOnly, extraOpts, skill) => {
+    const mode = rvStudyMode();
+    if (mode === 'mix' || typeof SMODE === 'undefined') return null;
+    let types = SMODE.typesFor(mode, { audioOk: ctx.audioOk, mix: base.mix });
+    if (skill) { const sk = types.filter(t => QE.TYPES[t].skill === skill); if (sk.length) types = sk; }
+    if (!types.length) return null;
+    return QS.choose(w, ctx, Object.assign({}, base, extraOpts || {}, { mix: SMODE.mixFor(mode, base.mix) }, fsrsOnly ? { fsrsOnly: true, only: types } : { only: types }));
+  };
   const officialQ = (fsrsOnly) => {
+    const mq = modeQ(fsrsOnly);
+    if (mq) return mq;
     const q = QS.choose(w, ctx, Object.assign({}, base, fsrsOnly ? { fsrsOnly: true, only: QE.SENTENCE_ORDER } : { only: QE.SENTENCE_ORDER }));
     if (q) return q;
     const fb = QE.WORD_FALLBACK_ORDER || [];
@@ -250,6 +290,8 @@ function rvBuildQuestionFor(item) {
     // V138: câu luyện thêm cũng hỏi THEO CÂU (không còn trắc nghiệm từ đơn lẻ). Không dựng được câu nào → null
     // (thẻ bị bỏ khỏi buổi này, KHÔNG rơi về dạng hỏi nghĩa của một từ).
     const opts = Object.assign({}, base, { allowPracticeOnly: true, exclude: item.failedTypes || [] });
+    const mq = modeQ(false, { allowPracticeOnly: true, exclude: item.failedTypes || [] }, item.targetSkill); // V168: câu luyện thêm cũng theo chế độ đang chọn (vẫn là luyện bổ sung)
+    if (mq) return mq;
     const only = item.targetSkill ? rvSentenceTypes(item.targetSkill) : [];
     // Ưu tiên đúng kỹ năng đang yếu; nếu kỹ năng đó không dựng được câu hợp lệ thì thử bất kỳ câu hỏi theo câu nào khác.
     const q = (only.length && QS.choose(w, ctx, Object.assign({}, opts, { only })))
@@ -901,6 +943,12 @@ function rvInjectStyle() {
   .rv-explain{font-size:.85rem;color:var(--muted);text-align:left;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:8px 0;line-height:1.5}
   .rv-start-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
   .rv-start-cell{background:var(--paper);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
+  .rv-mode-wrap{margin:10px 0}
+  .rv-mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .rv-mode{display:flex;flex-direction:column;gap:3px;text-align:left;background:var(--paper);color:var(--ink,inherit);border:1.5px solid var(--border);border-radius:12px;padding:9px 11px;cursor:pointer;min-height:44px;font:inherit}
+  .rv-mode.on{border-color:var(--active,#2563eb);background:var(--active-bg,#e0f2fe)}
+  .rv-mode:disabled{opacity:.5;cursor:not-allowed}
+  .rv-mode-t{font-weight:800;font-size:.9rem}.rv-mode-d{font-size:.72rem;color:var(--muted);line-height:1.35}
   .rv-start-num{font-size:1.5rem;font-weight:900}.rv-start-lbl{font-size:.72rem;color:var(--muted);font-weight:700}
   .rv-match{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
   .rv-match-col{display:flex;flex-direction:column;gap:8px}
@@ -1140,6 +1188,7 @@ function rvStartHtml() {
     </div>
     ${rvBlockedByBacklog ? `<div class="rv-explain">⏳ Đang có ${rvTotalDue} thẻ cần ôn, nên hệ thống tạm chặn học thêm từ mới cho đến khi ôn hết.</div>` : ''}
     ${rvCapOffSkipped > 0 ? `<div class="rv-explain" role="alert">⚠️ Cài đặt “Số thẻ tối đa mỗi buổi học” đang là <b>Tắt</b> nên ${rvCapOffSkipped} thẻ ôn/từ mới KHÔNG được đưa vào buổi này (chỉ còn câu luyện bổ sung).<div style="text-align:center;margin-top:8px"><button class="btn btn-primary" onclick="rvEnableOfficialCards()">Bật lại thẻ ôn tập</button></div></div>` : ''}
+    ${rvModePickerHtml()}
     ${rvPlanHtml()}
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px">
       <button class="btn btn-primary" onclick="rvBeginSession()">▶️ Bắt đầu học</button>

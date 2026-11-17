@@ -16,7 +16,7 @@
 
 const SW_KEY = 'swPrefs.v1';
 const SW_LAYOUTS = ['standard', 'focus', 'max-space'];
-const SW_DEFAULTS = { layout: 'standard', hz: 1, opt: 1, gap: 'normal', autoAudio: true, readTwice: true, autoNext: 'normal', strict: false };
+const SW_DEFAULTS = { layout: 'standard', hz: 1, opt: 1, gap: 'normal', autoAudio: true, readTwice: true, autoNext: 'normal', strict: false, mode: 'mix' };
 const SW_GAP_PX = { tight: 6, normal: 12, loose: 20 };
 const SW_NEXT_MS = { fast: 1200, normal: 2000, slow: 3500 }; // thời gian đọc phản hồi trước khi TỰ chuyển câu (chỉ khi trả lời đúng)
 
@@ -32,6 +32,7 @@ function swNormalizePrefs(raw) {
     readTwice: r.readTwice === undefined ? SW_DEFAULTS.readTwice : !!r.readTwice, // V157: đọc đáp án 2 lần rồi mới sang câu kế
     autoNext: SW_NEXT_MS[r.autoNext] ? r.autoNext : SW_DEFAULTS.autoNext,
     strict: !!r.strict,
+    mode: (typeof SMODE !== 'undefined') ? SMODE.normalize(r.mode) : SW_DEFAULTS.mode, // V168: chế độ học (bộ dạng đề)
   };
 }
 function swLoadPrefs() {
@@ -222,6 +223,7 @@ function swRenderPanel() {
     ${swSwitchRow('sw-cb-hv', 'Hiện Hán Việt', sh, "swToggleDisplay('hv')")}
     ${swSwitchRow('sw-cb-au', 'Tự phát âm', swPrefs.autoAudio, "swSetPref('autoAudio', this.checked)", 'Câu nghe vẫn có nút 🔊 để nghe lại')}
     ${swSwitchRow('sw-cb-rt', 'Đọc đáp án 2 lần', swPrefs.readTwice, "swSetPref('readTwice', this.checked)", 'Sau khi trả lời, đọc 2 lần (có khoảng nghỉ) rồi mới sang câu kế')}
+    ${(typeof SMODE !== 'undefined') ? swSegRow('Chế độ học', 'mode', SMODE.list().map((m) => [m.id, m.short]), (typeof rvStudyMode === 'function') ? rvStudyMode() : swPrefs.mode) : ''}
     ${swSegRow('Tự chuyển câu (khi đúng)', 'autoNext', [['fast', 'Nhanh'], ['normal', 'Vừa'], ['slow', 'Chậm']], swPrefs.autoNext)}
     <div class="sw-sep"></div>
     ${swSwitchRow('sw-cb-strict', '🧪 Kiểm tra trí nhớ thực sự', swPrefs.strict, 'swToggleStrict(this.checked)', 'Ít gợi ý: không hiện pinyin ở đề khi không kiểm tra pinyin; không tự phát âm trừ câu nghe; ghi rõ câu đúng nhờ gợi ý')}
