@@ -93,7 +93,8 @@
     "test:v164": "node test/v164-py-duplicates.test.js",
     "test:v166": "node test/v166-conversation-import.test.js",
     "test:v167": "node test/v167-listen-sent-zh.test.js",
-    "test:v168": "node test/v168-study-modes.test.js"
+    "test:v168": "node test/v168-study-modes.test.js",
+    "test:v170": "node test/v170-example-3pairs.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1164.0",
