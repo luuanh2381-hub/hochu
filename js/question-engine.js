@@ -681,7 +681,7 @@ const QE = (function () {
     }
     if (ds.length < 3) return null;
     const placed = placeCorrect({ key: s.zh, label: s.zh, sub: null }, ds.map(d => ({ key: d.zh, label: d.zh, sub: null })), ctx);
-    return assembleSentence('sentPick', word, ctx, { kind: 'sentWord', main: word.vi, sub: null, ask: `Câu nào dùng đúng từ 「${word.hz}」 (${word.vi})?` }, placed, s);
+    return assembleSentence('sentPick', word, ctx, { kind: 'sentWord', main: word.vi, sub: null, ask: `Câu nào dùng đúng từ 「${word.hz}」?` }, placed, s);
   }
   function buildConfusable(word, ctx) {
     const groups = ctx.confuseGroups || [];
