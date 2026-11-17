@@ -239,3 +239,9 @@ Mục lục báo cáo audit: `docs/audit/INDEX.md`.
 - Không đổi: api/, lib/ (không migration). Tỷ lệ dạng bài người học đã đặt (`rvQuestionMix`) vẫn được tôn trọng: dạng đặt "Tắt" bị loại khỏi chế độ; "Dịch nghe" nhân thêm trọng số (listenSent2vi ×2, listenSent2zh ×1, listen2vi ×0.5).
 - Test: `npm run test:v168` (26 test; có trong verify:ui + verify:core); `adaptive-session` cập nhật danh sách hàm trích (thêm rvAudioOk, rvStudyMode).
 - Chưa kiểm tra trên trình duyệt thật (chỉ dựng thử HTML bộ chọn với CSS thật: sáng/tối/điện thoại ổn).
+
+## V170 — Nhập câu ví dụ từ file: tối đa 3 cặp / 1 từ
+- `js/example-file.js` (module thuần, global `EXF`): `expandRows(rawRows)` tách mỗi dòng file thành ≤3 dòng `{hz,zh,vi,py}` (cột `zh1/py1/vi1 … zh3/py3/vi3`; cặp 1 có thể ghi `zh/py/vi`; tiêu đề không phân biệt hoa/thường/dấu; nhận cả file kiểu cũ 1 câu/dòng; cột cặp 4+ bị báo "bỏ qua"). `labelFor` đổi số dòng server → "dòng (cặp n)".
+- `js/admin.js`: mẫu `.xlsx` mới 3 cặp; `readExampleFile` trả `{rows, src, ignoredColumns}`; nhập theo lô 4000 (server giữ giới hạn 5000/lần) và gộp kết quả; xoá-theo-file dùng cùng bộ đọc (tối đa 5000 câu).
+- Server (`importWordExamples`, api) KHÔNG đổi. Lưu ý: màn học vẫn lấy 1 ví dụ/từ (V165 `DISTINCT ON (hz)`) — 3 cặp được lưu đủ trong `word_examples` nhưng chỉ 1 cặp (ưu tiên có pinyin, mới nhất) hiện ở "Hôm nay học".
+- Test: `npm run test:v170` (10 test; có trong verify:ui).
