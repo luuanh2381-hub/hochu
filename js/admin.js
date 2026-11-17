@@ -92,9 +92,8 @@ function renderVocabAdmin() {
   <div class="panel">
     <div class="panel-title">📄 Quản lý câu ví dụ bằng file</div>
     <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px;">
-      File Excel (.xlsx) hoặc CSV, dòng đầu là tiêu đề với 4 cột: <b>hz</b> (chữ Hán của từ), <b>zh</b> (câu ví dụ tiếng Trung — phải chứa từ đó), <b>py</b> (pinyin của cả câu, hiện ở màn đáp án khi học), <b>vi</b> (nghĩa tiếng Việt). Cột py có thể để trống; nếu câu đã có mà chưa có pinyin thì nhập lại file sẽ bổ sung pinyin.
-      Từ phải đã có trong kho từ vựng; câu đã tồn tại sẽ được bỏ qua.
-    </div>
+      File Excel (.xlsx) hoặc CSV, dòng đầu là tiêu đề. <b>Mỗi từ 1 dòng, tối đa 3 cặp câu ví dụ</b>: cột <b>hz</b> (chữ Hán của từ) rồi từng cặp <b>zh1, py1, vi1</b> · <b>zh2, py2, vi2</b> · <b>zh3, py3, vi3</b> (zh = câu tiếng Trung — phải chứa từ đó; py = pinyin cả câu, hiện ở màn đáp án; vi = nghĩa tiếng Việt). Cặp 2, 3 để trống nếu không cần; py có thể để trống. Vẫn nhận file kiểu cũ (mỗi dòng 1 câu: hz, zh, py, vi). Nếu câu đã có mà chưa có pinyin thì nhập lại file sẽ bổ sung pinyin.
+      Từ phải đã có trong kho từ vựng; câu đã tồn tại sẽ được bỏ qua. Bấm "Tải file mẫu" để lấy mẫu 3 cặp.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
       <input type="file" id="wex-file-input" accept=".xlsx,.xls,.csv" style="font-size:.8rem;max-width:100%;">
       <button class="btn btn-sm" style="background:var(--l9c);color:var(--l9a);" onclick="uploadExampleFile()">📤 Nhập ví dụ từ file</button>
@@ -424,45 +423,45 @@ async function triggerHanVietGeneration() {
 // ── V156: quản lý câu ví dụ bằng file ──
 function wexEsc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function downloadExampleTemplate() {
-  const ws = XLSX.utils.json_to_sheet([
-    { hz: '学习', zh: '我每天学习汉语。', py: 'Wǒ měitiān xuéxí Hànyǔ.', vi: 'Mỗi ngày tôi học tiếng Trung.' },
-    { hz: '朋友', zh: '他是我的好朋友。', py: 'Tā shì wǒ de hǎo péngyou.', vi: 'Anh ấy là bạn tốt của tôi.' },
-  ]);
+  // V170: mẫu DẠNG RỘNG — 1 dòng / 1 từ, tối đa 3 cặp (zh1/py1/vi1 … zh3/py3/vi3)
+  const ws = XLSX.utils.json_to_sheet(EXF.TEMPLATE_ROWS);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ví dụ');
   XLSX.writeFile(wb, 'mau-cau-vi-du.xlsx');
 }
-// Đọc file .xlsx/.csv → [{hz, zh, vi}] (chấp nhận tiêu đề tiếng Việt: "Chữ Hán", "Câu ví dụ", "Nghĩa")
+// Đọc file .xlsx/.csv → { rows:[{hz,zh,vi,py}], src } (V170: mỗi dòng có thể chứa tới 3 cặp zh/py/vi — xem js/example-file.js).
+// Tiêu đề không phân biệt hoa/thường/dấu; vẫn nhận file dạng cũ (1 câu / dòng).
 async function readExampleFile() {
   const input = document.getElementById('wex-file-input');
   const file = input && input.files && input.files[0];
   if (!file) throw new Error('Chưa chọn file.');
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-  if (!rows.length) throw new Error('File không có dữ liệu.');
-  // V162: tiêu đề cột không phân biệt hoa/thường, dấu, khoảng trắng; chấp nhận py/pinyin/piyin/phiên âm...
-  const norm = k => String(k).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const ALIAS = { hz: ['hz', 'chuhan', 'tu'], zh: ['zh', 'cauvidu', 'cau'], vi: ['vi', 'nghia', 'dich'], py: ['py', 'pinyin', 'piyin', 'pinyi', 'phienam', 'phatam'] };
-  return rows.map(r => {
-    const m = {}; for (const k of Object.keys(r)) m[norm(k)] = r[k];
-    const get = f => { for (const a of ALIAS[f]) if (m[a] !== undefined && String(m[a]).trim() !== '') return String(m[a]).trim(); return ''; };
-    return { hz: get('hz'), zh: get('zh'), vi: get('vi'), py: get('py') };
-  });
+  const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+  if (!raw.length) throw new Error('File không có dữ liệu.');
+  const out = EXF.expandRows(raw);
+  if (!out.rows.length) throw new Error('Không đọc được dòng nào — kiểm tra dòng tiêu đề (hz, zh1, py1, vi1, zh2, …).');
+  return out;
 }
 function wexLines(list, key) {
   if (!list || !list.length) return '';
   return `<ul style="margin:6px 0 0;padding-left:18px;font-size:.76rem;color:var(--muted);">${list.map(x => `<li>Dòng ${x.line}: ${wexEsc(x.reason)}</li>`).join('')}</ul>`;
 }
+const WEX_CHUNK = 4000; // server nhận tối đa 5000 dòng / lần; mỗi từ có thể ra 3 dòng → gửi theo lô
 async function uploadExampleFile() {
   const el = document.getElementById('wex-file-result');
   try {
-    const rows = await readExampleFile();
-    el.textContent = `Đang nhập ${rows.length} dòng...`;
-    const res = await fetch('/api/admin/word-examples/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ rows }) });
-    const d = await res.json();
-    if (!d.ok) { el.textContent = '❌ ' + (d.error || 'Có lỗi xảy ra'); return; }
-    el.innerHTML = `✅ Đã thêm <b>${d.added}</b> câu${d.updatedPinyin ? `, bổ sung pinyin cho <b>${d.updatedPinyin}</b> câu đã có` : ''}, bỏ qua <b>${d.duplicate}</b> câu đã có, <b>${d.skippedTotal}</b> dòng không hợp lệ.${d.withoutPinyin ? ` ⚠️ ${d.withoutPinyin} câu mới thêm chưa có pinyin.` : ''}${wexLines(d.skipped)}`;
+    const { rows, src, ignoredColumns } = await readExampleFile();
+    const tot = { added: 0, updatedPinyin: 0, duplicate: 0, skippedTotal: 0, withoutPinyin: 0 }; const skipped = [];
+    for (let off = 0; off < rows.length; off += WEX_CHUNK) {
+      el.textContent = `Đang nhập ${Math.min(off + WEX_CHUNK, rows.length)}/${rows.length} câu...`;
+      const res = await fetch('/api/admin/word-examples/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ rows: rows.slice(off, off + WEX_CHUNK) }) });
+      const d = await res.json();
+      if (!d.ok) { el.textContent = '❌ ' + (d.error || 'Có lỗi xảy ra') + (off ? ` (đã nhập xong ${off} câu đầu)` : ''); return; }
+      for (const k of Object.keys(tot)) tot[k] += d[k] || 0;
+      for (const x of d.skipped || []) skipped.push({ line: EXF.labelFor(src, x.line, off), reason: x.reason });
+    }
+    el.innerHTML = `✅ Đã thêm <b>${tot.added}</b> câu${tot.updatedPinyin ? `, bổ sung pinyin cho <b>${tot.updatedPinyin}</b> câu đã có` : ''}, bỏ qua <b>${tot.duplicate}</b> câu đã có, <b>${tot.skippedTotal}</b> câu không hợp lệ.${tot.withoutPinyin ? ` ⚠️ ${tot.withoutPinyin} câu mới thêm chưa có pinyin.` : ''}${ignoredColumns.length ? ` ⚠️ Bỏ qua cột ${ignoredColumns.map(wexEsc).join(', ')} (chỉ nhận tối đa ${EXF.MAX_PAIRS} cặp).` : ''}${wexLines(skipped.slice(0, 50))}`;
     document.getElementById('wex-file-input').value = '';
     loadWordExampleProgress();
     searchWordExamples();
@@ -472,12 +471,13 @@ let wexPendingDelete = null;
 async function previewDeleteExamplesByFile() {
   const el = document.getElementById('wex-file-result');
   try {
-    const rows = await readExampleFile();
+    const { rows, src } = await readExampleFile();
+    if (rows.length > 5000) throw new Error('File quá lớn: tối đa 5000 câu mỗi lần xoá.');
     const res = await fetch('/api/admin/word-examples/delete-by-file', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ rows, dryRun: true }) });
     const d = await res.json();
     if (!d.ok) { el.textContent = '❌ ' + (d.error || 'Có lỗi xảy ra'); return; }
     wexPendingDelete = rows;
-    el.innerHTML = `Xem trước: sẽ xoá <b>${d.matched}</b> câu; <b>${d.notFoundTotal}</b> dòng không khớp câu nào.${wexLines(d.notFound)}
+    el.innerHTML = `Xem trước: sẽ xoá <b>${d.matched}</b> câu; <b>${d.notFoundTotal}</b> câu không khớp.${wexLines((d.notFound || []).map(x => ({ line: EXF.labelFor(src, x.line, 0), reason: x.reason })))}
       ${d.matched ? `<div style="margin-top:8px;"><button class="btn btn-sm" style="background:#c0392b;color:#fff;" onclick="confirmDeleteExamplesByFile()">Xác nhận xoá ${d.matched} câu (không hoàn tác)</button></div>` : ''}`;
   } catch (e) { el.textContent = '❌ ' + e.message; }
 }
