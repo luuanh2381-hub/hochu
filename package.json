@@ -95,6 +95,7 @@
     "test:v167": "node test/v167-listen-sent-zh.test.js",
     "test:v168": "node test/v168-study-modes.test.js",
     "test:v170": "node test/v170-example-3pairs.test.js",
+    "test:v172": "node test/v172-sentence-words.test.js",
     "test:v171": "node test/v171-ai-config.test.js && node test/v171-ai-config-db.test.js"
   },
   "dependencies": {
