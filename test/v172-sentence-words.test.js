@@ -44,12 +44,12 @@ function loadHtml() {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ctx = { escapeHtml: esc, showPinyin: true }; vm.createContext(ctx); vm.runInContext(rv.slice(a, b) + '\nthis.f = rvExWordsHtml;', ctx); return ctx;
 }
-test('màn đáp án: liệt kê từ mới (chữ, pinyin, nghĩa, ghi chú), hiện đủ mọi từ (V175), thoát HTML, tôn trọng tắt pinyin, không có dữ liệu → rỗng', () => {
+test('màn đáp án: liệt kê từ mới (chữ, pinyin, nghĩa, ghi chú), hiện đủ mọi từ (V175), thoát HTML, luôn hiện pinyin, không có dữ liệu → rỗng', () => {
   const c = loadHtml();
   const e = { hz: '公园', zh: Z1, words: [{ word: '公园', py: 'gōngyuán', vi: 'công viên' }, { word: '散步', py: 'sànbù', vi: 'đi <dạo>', note: 'ly hợp' }] };
   const h = c.f(e); assert.ok(h.includes('散步') && h.includes('sànbù') && h.includes('đi &lt;dạo&gt;') && h.includes('ly hợp') && h.includes('Từ mới trong câu'));
   assert.ok(h.includes('công viên'), 'V175: hiện đủ mọi từ, kể cả từ đang học');
-  c.showPinyin = false; assert.ok(!c.f(e).includes('sànbù')); c.showPinyin = true;
+  c.showPinyin = false; assert.ok(c.f(e).includes('sànbù'), 'V175: pinyin luôn hiện dù tắt Hiện Pinyin'); c.showPinyin = true;
   assert.strictEqual(c.f({ hz: 'a', words: [] }), ''); assert.strictEqual(c.f({ hz: 'a' }), ''); assert.strictEqual(c.f(null), ''); 
 });
 test('nối dây: 3 khối .rv-ex của Hôm nay học gọi rvExWordsHtml; server/route/nạp script đúng thứ tự; route chỉ admin', () => {

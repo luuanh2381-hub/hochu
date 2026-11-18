@@ -30,6 +30,11 @@ test('V175: lưới 2 cột; số từ lẻ → từ cuối trải ngang để 2
   assert.ok(h.includes('rv-words-g odd') && h.includes('(3)') && h.includes('bùdébù'));
   assert.ok(rv.includes('grid-template-columns:1fr 1fr'));
 });
+test('V175: luôn hiện pinyin (kể cả tắt Hiện Pinyin); thiếu pinyin → ghép từ kho từ vựng; thiếu hẳn → "—"; nghĩa luôn có', () => {
+  const h = env({ showPinyin: false, WORDS: [{ hz: '不', py: 'bù' }, { hz: '得', py: 'dé' }] }).block();
+  assert.ok(h.includes('jīnglǐ') && h.includes('bù dé bù'), 'ghép từng chữ khi thiếu pinyin');
+  assert.ok(env({ showPinyin: false }).block().includes('rv-words-py">—<'), 'không có dữ liệu → —');
+});
 test('pinyin cả câu vẫn hiện ở màn kết quả dù đang tắt "Hiện Pinyin" (như dòng "Pinyin cả câu" cũ)', () => { assert.ok(env({ showPinyin: false }).block().includes('Xiàwǔ')); });
 test('khung giải thích KHÔNG còn lặp câu đầy đủ / nghĩa cả câu / pinyin cả câu / dòng tóm tắt từ → rỗng', () => { assert.strictEqual(env().explain(), ''); });
 test('câu cloze: bỏ "Câu hoàn chỉnh" + "Nghĩa" nhưng giữ nguyên các dòng khác (mẹo / thanh điệu)', () => {
