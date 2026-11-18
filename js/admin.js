@@ -102,6 +102,7 @@ function renderVocabAdmin() {
       <button class="btn btn-sm" style="background:#fdecea;color:#c0392b;" onclick="previewDeleteExamplesByFile()">🗑️ Xoá theo file (xem trước)</button>
     </div>
     <div id="wex-file-result" style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;overflow-wrap:anywhere;"></div>
+    ${sentwPanelHtml()}
     <div style="font-weight:800;font-size:.85rem;margin:8px 0 6px;">Xoá theo bài</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
       <input id="wex-lesson" type="number" min="1" max="9999" placeholder="Bài số" style="width:110px;padding:8px 10px;border-radius:10px;border:1px solid var(--border-strong);background:var(--card);color:var(--ink);">

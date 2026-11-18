@@ -636,6 +636,15 @@ function rvFindExample(hz) {
 function rvExPy(e) {
   return (e && e.py && (typeof showPinyin === 'undefined' || showPinyin)) ? `<br><span class="rv-sent-py">${escapeHtml(e.py)}</span>` : '';
 }
+// V172: "Từ mới trong câu" — giải thích từ khác trong câu ví dụ (dữ liệu nhập từ file ở Quản trị). Chỉ hiện ở màn ĐÁP ÁN (không lộ đáp án),
+// bỏ từ đang học (đã có thẻ riêng). Mỗi từ 1 dòng: chữ Hán (pinyin) — nghĩa · ghi chú.
+function rvExWordsHtml(e) {
+  const ws = e && Array.isArray(e.words) ? e.words.filter(w => w && w.word && w.word !== e.hz) : [];
+  if (!ws.length) return '';
+  const py = (typeof showPinyin === 'undefined' || showPinyin);
+  return `<div class="rv-words"><div class="rv-words-t">📚 Từ mới trong câu</div>${ws.map(w =>
+    `<div class="rv-words-i"><b lang="zh">${escapeHtml(w.word)}</b>${py && w.py ? ` <span class="rv-words-py">(${escapeHtml(w.py)})</span>` : ''} — ${escapeHtml(w.vi)}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div>`).join('')}</div>`;
+}
 // V138 — câu CHỮ HÁN cần đọc sau khi trả lời (cả câu, không chỉ từ). Câu hỏi theo câu → câu thật của câu hỏi;
 // dạng cũ (nếu còn) → chữ Hán của từ. Dùng cho cả tự phát sau khi trả lời lẫn nút "Nghe lại câu".
 function rvAnswerSentence(q) {
@@ -943,6 +952,9 @@ function rvInjectStyle() {
   .rv-explain{font-size:.85rem;color:var(--muted);text-align:left;background:var(--paper);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:8px 0;line-height:1.5}
   .rv-start-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
   .rv-start-cell{background:var(--paper);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
+  .rv-words{margin-top:8px;padding-top:6px;border-top:1px dashed var(--border);text-align:left;font-size:.85rem;line-height:1.5}
+  .rv-words-t{font-weight:800;font-size:.78rem;color:var(--muted);margin-bottom:2px}
+  .rv-words-i{color:var(--ink,inherit)}.rv-words-py{color:var(--muted)}.rv-words-n{color:var(--muted);font-size:.8rem}
   .rv-mode-wrap{margin:10px 0}
   .rv-mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
   .rv-mode{display:flex;flex-direction:column;gap:3px;text-align:left;background:var(--paper);color:var(--ink,inherit);border:1.5px solid var(--border);border-radius:12px;padding:9px 11px;cursor:pointer;min-height:44px;font:inherit}
@@ -1129,7 +1141,7 @@ function rvIntroHtml(tagLabel, w) {
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
       ${audioOk ? `<button id="rv-play" class="btn btn-sound btn-sm" onclick="speak('${escapeJsAttr(w.hz)}')">🔊 Nghe</button>` : ''}
       ${renderHanziParts(w.hz, false, true)}
-      ${ex ? `<div class="rv-ex">${escapeHtml(ex.zh)}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(ex.vi || '')}</span></div>` : ''}
+      ${ex ? `<div class="rv-ex">${escapeHtml(ex.zh)}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(ex.vi || '')}</span>${rvExWordsHtml(ex)}</div>` : ''}
       <div style="text-align:center;margin-top:14px"><button class="btn btn-primary" onclick="rvIntroDone()">Đã xem — kiểm tra ngay</button></div>`;
 }
 
@@ -1337,7 +1349,7 @@ function renderReview() {
       ${renderHanziParts(w.hz, false, true)}
       ${rvExplainHtml()}
       ${rvAiHtml(w, r)}
-      ${(exD && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span></div>` : ''}
+      ${(exD && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span>${rvExWordsHtml(exD)}</div>` : ''}
       <div style="text-align:center;margin-top:12px"><button class="btn btn-primary" onclick="rvPracticeContinue()">Tiếp tục</button></div>`;
   } else {
     // Đã có kết quả trắc nghiệm: lộ đáp án đầy đủ + bổ sung "Highlight System Rating" — hiện lại 4
@@ -1365,7 +1377,7 @@ function renderReview() {
       ${rvExplainHtml()}
       ${r && !r.correct ? rvCorrectionHtml(w, r) : ''}
       ${rvAiHtml(w, r)}
-      ${(ex && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${ex.zh}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span></div>` : ''}
+      ${(ex && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${ex.zh}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span>${rvExWordsHtml(ex)}</div>` : ''}
       ${rvRenderRatingBar()}
       ${savedLine}
       ${(isAdminRole() && r && r.autoRating) ? `<div class="rv-saved-line">🐞 debug: auto rating = ${r.autoRating}</div>` : ''}`;
