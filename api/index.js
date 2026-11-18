@@ -15,7 +15,7 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   removeVocabWordFromLesson, setVocabWordLessons, findVocabWordByHz, // V93 (audit thống nhất từ vựng)
   getAllVocabWords, updateVocabHanviet, getWordExampleCounts, insertWordExamples, importWordExamples, deleteWordExamplesByRows, deleteWordExamplesByLesson, listWordExamples, deleteWordExample, getWordExamplesForLessons, getWordExamplesForWord,
   getAllHanziParts, getHanziPartsKeys, insertHanziParts, deleteHanziParts,
-  insertActivityLog, getActivityLogs, reserveGeminiSlot, bumpGeminiRateLimit, getAiConfigRow, saveAiConfigRow,
+  insertActivityLog, getActivityLogs, reserveGeminiSlot, bumpGeminiRateLimit, getAiConfigRow, saveAiConfigRow, listSentencesForWordsExport, importSentenceWords,
   getWeakFsrsCards, getFsrsCardsDebug,
   getWordForAnswerCheck, countKnownFsrsWords, getKnownCountsForUsers, getKnownCountsByLesson,
   getBookDefs, createBookDef, updateBookDef, deleteBookDef, getLessonsByWordIds,
@@ -39,6 +39,7 @@ const wordNotes = require('../lib/word-notes');
 const aiExplain = require('../lib/ai-explain'); // V119: "🤖 Hỏi AI" ở câu sai
 const ttsHints = require('../lib/tts-hints'); // V129: "Sửa phát âm" cho chữ Hán đa âm
 const r2 = require('../lib/r2'); // Cloudflare R2 — CHỈ còn dùng cho ảnh gợi nhớ (V142); âm thanh không dùng R2 (V148). Credentials CHỈ ở server
+const SWX = require('../js/sentence-words-file'); // V172: từ mới trong câu ví dụ (dùng chung client/server)
 const aiConfigLib = require('../lib/ai-config'); // V171: cấu hình AI ở màn Quản trị (DB > biến môi trường > mặc định)
 const wordImagesLib = require('../lib/word-images'); // V142: ảnh gợi nhớ (Cloudflare FLUX.1 schnell → R2)
 const orderSentence = require('../js/order-sentence'); // V135: chấm "Sắp xếp câu" (dùng CHUNG js/ với trình duyệt)
@@ -3779,6 +3780,29 @@ app.get('/api/admin/word-examples/progress', async (req, res) => {
     const total = uniqueHz.length;
     const done = uniqueHz.filter(hz => (counts[hz] || 0) >= MIN_EXAMPLES_PER_WORD).length;
     res.json({ ok: true, total, done });
+  } catch (e) { fail(res, e); }
+});
+
+// ── V172: "Từ mới trong câu ví dụ" — XUẤT file câu cần giải thích (đưa sang công cụ AI bên ngoài điền) rồi NHẬP lại. Chỉ admin. ──
+app.get('/api/admin/sentence-words/export', async (req, res) => {
+  const authed = await adminOnly(req, res); if (!authed) return;
+  try {
+    const scope = req.query.scope === 'all' ? 'all' : 'missing';
+    const r = await listSentencesForWordsExport(scope, req.query.limit);
+    res.json({ ok: true, scope, rows: SWX.exportRows(r.rows), count: r.rows.length, total: r.total, done: r.done });
+  } catch (e) { fail(res, e); }
+});
+app.post('/api/admin/sentence-words/import', async (req, res) => {
+  const authed = await adminOnly(req, res); if (!authed) return;
+  try {
+    const b = req.body || {};
+    if (!Array.isArray(b.sentences)) return res.status(400).json({ ok: false, error: 'Thiếu danh sách câu (sentences)' });
+    if (b.sentences.length > SWX.MAX_ROWS) return res.status(400).json({ ok: false, error: `Tối đa ${SWX.MAX_ROWS} câu mỗi lần` });
+    const v = SWX.validateSentences(b.sentences);
+    const dryRun = !!b.dryRun;
+    const r = await importSentenceWords(v.sentences, { dryRun, overwrite: !!b.overwrite });
+    if (!dryRun) logActivity(authed.username, authed.db.users[authed.username].role, 'vocab', `Nhập từ mới trong câu: ${r.wordsAdded} từ / ${r.sentencesTouched} câu${b.overwrite ? ' (ghi đè)' : ''}, không tìm thấy ${r.notFound.length} câu`);
+    res.json({ ok: true, dryRun, ...r, notFound: r.notFound.slice(0, 50), notFoundTotal: r.notFound.length, errors: v.errors.slice(0, 50), errorTotal: v.errors.length });
   } catch (e) { fail(res, e); }
 });
 
