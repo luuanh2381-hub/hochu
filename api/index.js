@@ -15,7 +15,7 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   removeVocabWordFromLesson, setVocabWordLessons, findVocabWordByHz, // V93 (audit thống nhất từ vựng)
   getAllVocabWords, updateVocabHanviet, getWordExampleCounts, insertWordExamples, importWordExamples, deleteWordExamplesByRows, deleteWordExamplesByLesson, listWordExamples, deleteWordExample, getWordExamplesForLessons, getWordExamplesForWord,
   getAllHanziParts, getHanziPartsKeys, insertHanziParts, deleteHanziParts,
-  insertActivityLog, getActivityLogs, reserveGeminiSlot, bumpGeminiRateLimit,
+  insertActivityLog, getActivityLogs, reserveGeminiSlot, bumpGeminiRateLimit, getAiConfigRow, saveAiConfigRow,
   getWeakFsrsCards, getFsrsCardsDebug,
   getWordForAnswerCheck, countKnownFsrsWords, getKnownCountsForUsers, getKnownCountsByLesson,
   getBookDefs, createBookDef, updateBookDef, deleteBookDef, getLessonsByWordIds,
@@ -39,6 +39,7 @@ const wordNotes = require('../lib/word-notes');
 const aiExplain = require('../lib/ai-explain'); // V119: "🤖 Hỏi AI" ở câu sai
 const ttsHints = require('../lib/tts-hints'); // V129: "Sửa phát âm" cho chữ Hán đa âm
 const r2 = require('../lib/r2'); // Cloudflare R2 — CHỈ còn dùng cho ảnh gợi nhớ (V142); âm thanh không dùng R2 (V148). Credentials CHỈ ở server
+const aiConfigLib = require('../lib/ai-config'); // V171: cấu hình AI ở màn Quản trị (DB > biến môi trường > mặc định)
 const wordImagesLib = require('../lib/word-images'); // V142: ảnh gợi nhớ (Cloudflare FLUX.1 schnell → R2)
 const orderSentence = require('../js/order-sentence'); // V135: chấm "Sắp xếp câu" (dùng CHUNG js/ với trình duyệt)
 const PROGRAM_SENTENCES = require('../js/sentences-data'); // V135: câu mẫu giáo trình — nguồn câu ĐÚNG khi chấm sắp xếp câu
@@ -179,6 +180,8 @@ function logActivity(username, role, action, detail) {
 // lớn) — giảm dung lượng truyền qua mạng, giúp tải nhanh hơn nhất là mạng chậm/di động.
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
+// V171: làm "nóng" cấu hình AI (cache 20 giây) trước các route dùng CF_* đồng bộ (ảnh gợi nhớ, cron) — lỗi đọc cấu hình không chặn request.
+app.use(['/api/word-image', '/api/admin/word-images', '/api/cron'], async (req, res, next) => { try { await getAiRuntime(); } catch (e) { /* dùng env */ } next(); });
 
 // ── Xác thực: kiểm tra token, KHÔNG khoá dữ liệu (chỉ đọc) ──
 async function requireAuth(req, res) {
@@ -620,6 +623,79 @@ app.post('/api/admin/settings/registration', async (req, res) => {
     logActivity(authed.username, 'superadmin', 'admin', open ? 'Bật trang đăng ký' : 'Tắt trang đăng ký');
     res.json(result);
   } catch (e) { fail(res, e); }
+});
+
+// ════════════════════════════════════════════════════
+// V171 — [SUPERADMIN] Cấu hình TẤT CẢ AI ở màn Quản trị (nhà cung cấp, URL, model, khoá…). Không cần sửa code / biến môi trường.
+//   GET  /api/admin/ai-config        : cấu hình hiệu lực + nguồn từng trường (khoá KHÔNG bao giờ trả ra; chỉ "đã đặt" + 4 ký tự cuối).
+//   POST /api/admin/ai-config        : body { text?, speech?, image? } — bản vá; xem quy ước ở lib/ai-config.js applyPatch.
+//   POST /api/admin/ai-config/test   : body { target: 'text'|'speech', model? } — gọi thử THẬT bằng cấu hình đã lưu (1 model / lần).
+// ════════════════════════════════════════════════════
+function redactSecrets(msg, rt) {
+  let t = String(msg == null ? '' : msg);
+  for (const k of [rt.text.apiKey, rt.speech.apiKey, rt.image.token]) if (k && k.length >= 8) t = t.split(k).join('••••');
+  return t;
+}
+async function aiConfigSuper(req, res) {
+  const authed = await requireAuth(req, res);
+  if (!authed) return null;
+  if (!requireSuperAdmin(authed.db.users[authed.username], res)) return null;
+  return authed;
+}
+app.get('/api/admin/ai-config', async (req, res) => {
+  const authed = await aiConfigSuper(req, res); if (!authed) return;
+  try {
+    await getAiRuntime(true);
+    res.json({ ok: true, config: aiConfigLib.publicView(aiCfgCache.stored, process.env), updatedAt: aiCfgCache.updatedAt, updatedBy: aiCfgCache.updatedBy });
+  } catch (e) { fail(res, e); }
+});
+app.post('/api/admin/ai-config', async (req, res) => {
+  const authed = await aiConfigSuper(req, res); if (!authed) return;
+  try {
+    const row = await getAiConfigRow();
+    const r = aiConfigLib.applyPatch(row.data || {}, req.body || {});
+    if (r.errors.length) return res.status(400).json({ ok: false, error: r.errors.map((x) => x.message).join('; '), errors: r.errors });
+    await saveAiConfigRow(r.stored, authed.username);
+    await getAiRuntime(true);
+    // Ghi nhật ký KHÔNG kèm giá trị khoá — chỉ tên trường đã đổi.
+    const changed = Object.keys(req.body || {}).filter((k) => ['text', 'speech', 'image'].includes(k)).map((k) => k + ':' + Object.keys(req.body[k] || {}).filter((f) => !/key|token/i.test(f) || req.body[k][f]).join('+'));
+    logActivity(authed.username, 'superadmin', 'admin', 'Sửa cấu hình AI (' + changed.join(', ') + ')');
+    res.json({ ok: true, config: aiConfigLib.publicView(aiCfgCache.stored, process.env), updatedAt: aiCfgCache.updatedAt, updatedBy: aiCfgCache.updatedBy });
+  } catch (e) { fail(res, e); }
+});
+app.post('/api/admin/ai-config/test', async (req, res) => {
+  const authed = await aiConfigSuper(req, res); if (!authed) return;
+  if (!checkRateLimit(req, 'ai-config-test', { maxAttempts: 40, windowMs: 60 * 1000 })) return res.status(429).json({ ok: false, error: 'Thử quá nhanh, đợi một chút' });
+  const body = req.body || {};
+  let rt;
+  try { rt = await getAiRuntime(true); } catch (e) { return fail(res, e); }
+  const t0 = Date.now();
+  try {
+    if (body.target === 'speech') {
+      const c = rt.speech;
+      if (!c.apiKey) return res.json({ ok: false, error: 'Chưa có API key Gemini' });
+      const out = await new Promise((resolve, reject) => {
+        const rq = https.request({ hostname: 'generativelanguage.googleapis.com', path: `/v1beta/models/${encodeURIComponent(c.model)}`, method: 'GET', headers: { 'x-goog-api-key': c.apiKey } }, (resp) => {
+          let d = ''; resp.on('data', (x) => (d += x)); resp.on('end', () => {
+            if (resp.statusCode >= 400) { let m = d.slice(0, 200); try { m = JSON.parse(d).error.message || m; } catch (e) { /* giữ nguyên */ } return reject(new Error(`HTTP ${resp.statusCode}: ${m}`)); }
+            resolve(true);
+          });
+        });
+        rq.on('error', (e) => reject(new Error('Không kết nối được: ' + e.message)));
+        rq.setTimeout(15000, () => rq.destroy(new Error('Quá thời gian chờ 15 giây')));
+        rq.end();
+      });
+      return res.json({ ok: !!out, target: 'speech', model: c.model, ms: Date.now() - t0 });
+    }
+    const c = rt.text;
+    if (!c.apiKey) return res.json({ ok: false, error: 'Chưa có API key AI văn bản' });
+    const model = String(body.model || c.models[0] || '').trim();
+    if (!model || !c.models.includes(model)) return res.json({ ok: false, error: 'Model này chưa nằm trong danh sách đã lưu — bấm Lưu trước' });
+    const out = await doCallAi(model, 'Trả lời đúng một đối tượng JSON: {"ok": true}', true, { maxTokens: 64, timeoutMs: 20000, _cfg: c });
+    res.json({ ok: true, target: 'text', model, ms: Date.now() - t0, sample: String(out).slice(0, 80) });
+  } catch (e) {
+    res.json({ ok: false, target: body.target === 'speech' ? 'speech' : 'text', model: body.model || null, ms: Date.now() - t0, error: redactSecrets(cleanErrorMsg(e.message), rt).slice(0, 300) });
+  }
 });
 
 // ── [SUPERADMIN] Tạo tài khoản cho người khác (V119.3) — dùng được cả khi trang đăng ký đang TẮT ──
@@ -2739,24 +2815,26 @@ const https = require('https');
 // tier có thể khác nhau tuỳ từng Google Cloud project). Có thể ghi đè bằng biến môi trường
 // GEMINI_MODEL trên Vercel nếu sau này muốn thử model khác (vd "gemini-3.1-flash-lite" thường có
 // quota free tier cao hơn) mà không cần sửa code.
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
-
-// ── AI văn bản (sinh ví dụ, giải thích, dịch, chiết tự...) — dùng OpenRouter (API tương thích OpenAI), model MIỄN PHÍ ──
-// Biến môi trường:
-//   AI_API_KEY      (bắt buộc) — API key OpenRouter (https://openrouter.ai/keys); cũng nhận OPENROUTER_API_KEY
-//   AI_BASE_URL     (tuỳ chọn) — mặc định https://openrouter.ai/api/v1
-//   AI_MODELS       (tuỳ chọn) — danh sách model, cách nhau bằng dấu phẩy; thử lần lượt từ trái sang phải,
-//                                model nào lỗi (quá tải/hết quota/không tồn tại) thì tự chuyển sang model kế tiếp.
-//                                Mặc định `openrouter/free` = bộ định tuyến tự chọn 1 model miễn phí đang chạy được (có lọc theo tính năng
-//                                cần dùng như JSON). Muốn cố định: ví dụ `meta-llama/llama-3.3-70b-instruct:free` (thêm hậu tố :free).
-//   AI_MIN_INTERVAL_MS (tuỳ chọn) — giãn cách tối thiểu giữa 2 lần gọi, mặc định 3500ms (model free giới hạn ~20 yêu cầu/phút).
-//   AI_SITE_URL / AI_SITE_NAME (tuỳ chọn) — gửi kèm header HTTP-Referer / X-Title theo khuyến nghị của OpenRouter.
-const AI_BASE_URL = (process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-const AI_MODELS = (process.env.AI_MODELS || 'openrouter/free')
-  .split(',').map((m) => m.trim()).filter(Boolean);
-const AI_MIN_INTERVAL_MS = Number(process.env.AI_MIN_INTERVAL_MS) || 3500;
-const aiApiKey = () => process.env.AI_API_KEY || process.env.OPENROUTER_API_KEY || '';
-
+// V171: các giá trị bên dưới (model Gemini chấm phát âm, base URL / model / giãn cách / khoá AI văn bản, Cloudflare…) KHÔNG còn cố định
+// trong code: superadmin sửa ở Quản trị → "🤖 Cấu hình AI" (lưu bảng ai_config). Biến môi trường cũ vẫn là giá trị dự phòng:
+//   AI_API_KEY / OPENROUTER_API_KEY, AI_BASE_URL, AI_MODELS (cách nhau bằng dấu phẩy, thử lần lượt), AI_MIN_INTERVAL_MS,
+//   GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MIN_INTERVAL_MS, CF_AI_TOKEN, CF_ACCOUNT_ID, CF_AI_IMAGE_MODEL, CF_AI_IMAGE_STEPS.
+// Thứ tự ưu tiên: DB → biến môi trường → mặc định (xem lib/ai-config.js).
+const AI_CFG_TTL_MS = 20 * 1000; // cache theo từng instance; lưu xong instance này dùng ngay, instance khác thấy sau ≤ 20 giây
+let aiCfgCache = { at: 0, stored: null, updatedAt: null, updatedBy: null, resolved: null };
+function aiRuntimeSync() { return aiCfgCache.resolved || aiConfigLib.resolve({}, process.env); }
+async function getAiRuntime(force) {
+  if (!force && aiCfgCache.resolved && Date.now() - aiCfgCache.at < AI_CFG_TTL_MS) return aiCfgCache.resolved;
+  try {
+    const row = await getAiConfigRow();
+    aiCfgCache = { at: Date.now(), stored: row.data || {}, updatedAt: row.updatedAt, updatedBy: row.updatedBy, resolved: aiConfigLib.resolve(row.data || {}, process.env) };
+  } catch (e) {
+    // Bảng cấu hình lỗi KHÔNG được làm chết AI: dùng bản cache cũ, hoặc biến môi trường.
+    console.warn('⚠️  Không đọc được cấu hình AI từ DB:', cleanErrorMsg(e.message).slice(0, 160));
+    if (!aiCfgCache.resolved) aiCfgCache = { at: Date.now() - AI_CFG_TTL_MS + 5000, stored: {}, updatedAt: null, updatedBy: null, resolved: aiConfigLib.resolve({}, process.env) };
+  }
+  return aiCfgCache.resolved;
+}
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 // Luôn đảm bảo khoảng cách tối thiểu giữa 2 lần gọi Gemini để không vượt quota free tier —
@@ -2839,30 +2917,33 @@ async function callWithRetry(doFn, intervalMs = GEMINI_MIN_INTERVAL_MS) {
 // Thử lần lượt từng model trong AI_MODELS: lỗi tạm thời / hết quota / model không dùng được → sang model kế tiếp;
 // chỉ báo lỗi khi tất cả model đều lỗi (hoặc lỗi cấu hình như thiếu key, sai key).
 // V152: opts (tuỳ chọn) { maxTokens, timeoutMs } cho đầu ra dài (sinh hội thoại); không truyền → y hệt trước (4096 token, 25 giây).
-function callGemini(prompt, opts) {
-  return callWithRetry(() => callAiWithFallback(prompt, opts), AI_MIN_INTERVAL_MS);
+async function callGemini(prompt, opts) {
+  const cfg = (await getAiRuntime()).text;
+  return callWithRetry(() => callAiWithFallback(prompt, opts, cfg), cfg.minIntervalMs);
 }
-async function callAiWithFallback(prompt, opts) {
-  if (!aiApiKey()) throw new Error('Chưa cấu hình AI_API_KEY (API key OpenRouter) trên server');
+async function callAiWithFallback(prompt, opts, cfg) {
+  cfg = cfg || aiRuntimeSync().text;
+  if (!cfg.apiKey) throw new Error('Chưa cấu hình API key cho AI văn bản (Quản trị → Cấu hình AI, hoặc biến AI_API_KEY)');
   let lastErr;
-  for (const model of AI_MODELS) {
+  for (const model of cfg.models) {
     try {
-      return await doCallAi(model, prompt, true, opts);
+      return await doCallAi(model, prompt, true, Object.assign({}, opts, { _cfg: cfg }));
     } catch (e) {
       lastErr = e;
       if (e.fatal) throw e; // sai key / sai URL: thử model khác cũng vô ích
       console.warn(`⚠️  AI model ${model} lỗi: ${cleanErrorMsg(e.message).slice(0, 200)} → thử model kế tiếp`);
     }
   }
-  throw lastErr || new Error('Không có model AI nào được cấu hình (AI_MODELS trống)');
+  throw lastErr || new Error('Không có model AI nào được cấu hình (danh sách model trống)');
 }
 // Một số model suy luận trả kèm <think>...</think> — bỏ đi để còn lại JSON thuần.
 function stripThink(t) { return String(t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim(); }
 function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
   return new Promise((resolve, reject) => {
-    const apiKey = aiApiKey();
+    const cfg = (opts && opts._cfg) || aiRuntimeSync().text;
+    const apiKey = cfg.apiKey;
     let url;
-    try { url = new URL(AI_BASE_URL + '/chat/completions'); } catch (e) { return reject(Object.assign(new Error('AI_BASE_URL không hợp lệ'), { fatal: true })); }
+    try { url = new URL(cfg.baseUrl + '/chat/completions'); } catch (e) { return reject(Object.assign(new Error('URL API của AI không hợp lệ'), { fatal: true })); }
     const body = {
       model,
       messages: [{ role: 'user', content: prompt }],
@@ -2871,8 +2952,9 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
       stream: false,
       // V161: model free thường "suy nghĩ" trước và ngốn hết max_tokens → content rỗng (finish_reason: length).
       // Yêu cầu suy luận ở mức thấp; model không hỗ trợ sẽ bỏ qua tham số này.
-      reasoning: { effort: 'low' },
+      // V171: chỉ OpenRouter hiểu tham số `reasoning` (OpenAI/Groq/Gemini-OpenAI có thể từ chối tham số lạ); admin chỉnh mức hoặc tắt.
     };
+    if (cfg.provider === 'openrouter' && cfg.reasoning && cfg.reasoning !== 'off') body.reasoning = { effort: cfg.reasoning };
     if (useJsonMode) body.response_format = { type: 'json_object' };
     const payload = JSON.stringify(body);
     const lib = url.protocol === 'http:' ? require('http') : https;
@@ -2885,8 +2967,7 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload),
         'Authorization': 'Bearer ' + apiKey,
-        'HTTP-Referer': process.env.AI_SITE_URL || 'https://hochu.vercel.app',
-        'X-Title': process.env.AI_SITE_NAME || 'Hochu',
+        ...(cfg.provider === 'openrouter' ? { 'HTTP-Referer': process.env.AI_SITE_URL || 'https://hochu.vercel.app', 'X-Title': process.env.AI_SITE_NAME || 'Hochu' } : {}),
       },
     };
     const reqq = lib.request(options, (resp) => {
@@ -2934,13 +3015,15 @@ function doCallAi(model, prompt, useJsonMode = true, opts = {}) {
 
 // Giống callGemini() nhưng gửi kèm file âm thanh (multimodal) — dùng để chấm phát âm.
 // Dùng chung "hàng đợi" thời gian với callGemini() ở trên vì cùng chia sẻ 1 quota API key.
-function callGeminiWithAudio(prompt, audioBase64, mimeType) {
-  return callWithRetry(() => doCallGeminiWithAudio(prompt, audioBase64, mimeType));
+async function callGeminiWithAudio(prompt, audioBase64, mimeType) {
+  const cfg = (await getAiRuntime()).speech;
+  return callWithRetry(() => doCallGeminiWithAudio(prompt, audioBase64, mimeType, cfg), cfg.minIntervalMs);
 }
-function doCallGeminiWithAudio(prompt, audioBase64, mimeType) {
+function doCallGeminiWithAudio(prompt, audioBase64, mimeType, cfg) {
+  cfg = cfg || aiRuntimeSync().speech;
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return reject(new Error('Chưa cấu hình GEMINI_API_KEY trên server'));
+    const apiKey = cfg.apiKey;
+    if (!apiKey) return reject(new Error('Chưa cấu hình API key Gemini chấm phát âm (Quản trị → Cấu hình AI, hoặc biến GEMINI_API_KEY)'));
     const payload = JSON.stringify({
       contents: [{
         parts: [
@@ -2957,7 +3040,7 @@ function doCallGeminiWithAudio(prompt, audioBase64, mimeType) {
     });
     const options = {
       hostname: 'generativelanguage.googleapis.com',
-      path: `/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      path: `/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -3508,6 +3591,7 @@ app.post('/api/tts/suggest', async (req, res) => {
 function wordImagesService() {
   return wordImagesLib.getWordImages({
     callText: callGemini,
+    env: () => aiConfigLib.imageEnv(aiRuntimeSync(), process.env), // V171: CF_* lấy từ cấu hình AI (DB > env); nền được làm "nóng" bởi middleware bên dưới
     getWords: getAllVocabWords,
     getParts: async () => {
       const map = {};
@@ -4021,7 +4105,7 @@ async function runConversationGeneration({ ids, count, targetTurns, force, budge
         results.push({ dialogueId, status: 'failed', errors: r.errors, attempts: r.attempts });
         continue;
       }
-      await saveGeneratedConversation(convo.id, r.turns, { model: AI_MODELS.join(','), promptVersion: r.promptVersion });
+      await saveGeneratedConversation(convo.id, r.turns, { model: (await getAiRuntime()).text.models.join(','), promptVersion: r.promptVersion });
       drafted++;
       results.push({ dialogueId, status: 'draft', turns: r.turns.length, attempts: r.attempts, warnings: r.warnings });
     } catch (e) {
@@ -4145,8 +4229,9 @@ if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`✅ Server đang chạy tại http://localhost:${PORT}`);
     if (!process.env.DATABASE_URL) console.log('   ⚠️  Chưa đặt DATABASE_URL');
-    if (!aiApiKey()) console.log('   ⚠️  Chưa đặt AI_API_KEY (AI văn bản qua OpenRouter)');
-    if (!process.env.GEMINI_API_KEY) console.log('   ℹ️  Chưa đặt GEMINI_API_KEY (chỉ cần cho chấm phát âm bằng giọng nói)');
+    const rt0 = aiRuntimeSync();
+    if (!rt0.text.apiKey) console.log('   ℹ️  Chưa có API key AI văn bản (đặt ở Quản trị → Cấu hình AI, hoặc biến AI_API_KEY)');
+    if (!rt0.speech.apiKey) console.log('   ℹ️  Chưa có API key Gemini (chỉ cần cho chấm phát âm bằng giọng nói)');
   });
 }
 
