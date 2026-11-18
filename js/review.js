@@ -639,11 +639,21 @@ function rvExPy(e) {
 // V172: "Từ mới trong câu" — giải thích từ khác trong câu ví dụ (dữ liệu nhập từ file ở Quản trị). Chỉ hiện ở màn ĐÁP ÁN (không lộ đáp án),
 // bỏ từ đang học (đã có thẻ riêng). Mỗi từ 1 dòng: chữ Hán (pinyin) — nghĩa · ghi chú.
 function rvExWordsHtml(e) {
-  const ws = e && Array.isArray(e.words) ? e.words.filter(w => w && w.word && w.word !== e.hz) : [];
+  // V175: hiện TẤT CẢ từ database có cho câu này (không loại từ đang học), kèm PINYIN; chia 2 cột đều nhau.
+  const ws = e && Array.isArray(e.words) ? e.words.filter(w => w && w.word) : [];
   if (!ws.length) return '';
   const py = (typeof showPinyin === 'undefined' || showPinyin);
-  return `<div class="rv-words"><div class="rv-words-t">📚 Từ mới trong câu</div>${ws.map(w =>
-    `<div class="rv-words-i"><b lang="zh">${escapeHtml(w.word)}</b>${py && w.py ? ` <span class="rv-words-py">(${escapeHtml(w.py)})</span>` : ''} — ${escapeHtml(w.vi)}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div>`).join('')}</div>`;
+  // Thiếu pinyin trong dữ liệu từ-trong-câu → lấy pinyin của đúng từ đó trong kho từ vựng (nếu có).
+  const pyOf = (w) => {
+    if (w.py) return w.py;
+    if (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) { const hit = WORDS.find(x => x && x.hz === w.word && x.py); if (hit) return hit.py; }
+    return '';
+  };
+  const items = ws.map(w => {
+    const p = py ? pyOf(w) : '';
+    return `<div class="rv-words-i"><div class="rv-words-h"><b lang="zh">${escapeHtml(w.word)}</b>${p ? ` <span class="rv-words-py">${escapeHtml(p)}</span>` : ''}</div><div class="rv-words-m">${escapeHtml(w.vi || '')}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div></div>`;
+  });
+  return `<div class="rv-words"><div class="rv-words-t">📚 Từ mới trong câu (${ws.length})</div><div class="rv-words-g${items.length % 2 ? ' odd' : ''}">${items.join('')}</div></div>`;
 }
 // V173: q.sentence (QE.findSentences) chỉ copy zh/vi/py, KHÔNG mang theo `words` → tra lại "từ mới trong câu" theo nguyên văn câu trong kho ví dụ.
 function rvSentenceWords(zh) {
@@ -962,8 +972,11 @@ function rvInjectStyle() {
   .rv-start-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
   .rv-start-cell{background:var(--paper);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
   .rv-words{margin-top:8px;padding-top:6px;border-top:1px dashed var(--border);text-align:left;font-size:.85rem;line-height:1.5}
-  .rv-words-t{font-weight:800;font-size:.78rem;color:var(--muted);margin-bottom:2px}
-  .rv-words-i{color:var(--ink,inherit)}.rv-words-py{color:var(--muted)}.rv-words-n{color:var(--muted);font-size:.8rem}
+  .rv-words-t{font-weight:800;font-size:.78rem;color:var(--muted);margin-bottom:4px}
+  .rv-words-g{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .rv-words-g.odd .rv-words-i:last-child{grid-column:1 / -1}
+  .rv-words-i{color:var(--ink,inherit);background:var(--card-alt,rgba(127,127,127,.08));border-radius:8px;padding:6px 8px;min-width:0;overflow-wrap:anywhere}
+  .rv-words-h b{font-size:1rem}.rv-words-py{color:var(--muted);font-size:.8rem}.rv-words-m{font-size:.82rem}.rv-words-n{color:var(--muted);font-size:.8rem}
   .rv-mode-wrap{margin:10px 0}
   .rv-mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
   .rv-mode{display:flex;flex-direction:column;gap:3px;text-align:left;background:var(--paper);color:var(--ink,inherit);border:1.5px solid var(--border);border-radius:12px;padding:9px 11px;cursor:pointer;min-height:44px;font:inherit}
