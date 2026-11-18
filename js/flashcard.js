@@ -204,14 +204,10 @@ function fcUpdate() {
     <span class="fc-lesson-tag" style="${tagStyle2}">${lessonsLabel(w)}</span>${lyHopBadge}
     <div class="fc-hz-back">${w.hz}</div>
     ${showPinyin ? `<div class="fc-py">${w.py}</div>` : ''}
-    ${typeof wiSlot === 'function' ? wiSlot(w.hz) : ''}
     ${showMeaning ? `<div class="fc-vi">${w.vi}</div>` : `<button class="btn btn-sm" style="background:var(--l9b);color:var(--l9a);margin-bottom:6px;" onclick="event.stopPropagation();toggleMeaning();fcUpdate();">👁️ Hiện nghĩa</button>`}
     ${showHanViet && w.hanviet ? `<div class="fc-hv">Hán Việt: ${w.hanviet}</div>` : ''}
     <button class="btn btn-sound btn-sm" onclick="event.stopPropagation();speak('${w.hz}')">🔊 Nghe</button>
     ${renderHanziParts(w.hz)}`;
-  if (typeof wiMount === 'function') wiMount(document.getElementById('fc-back')); // V142: ảnh gợi nhớ (nếu đã có)
-  // V143: tải trước ảnh thẻ kế tiếp — lật sang thẻ sau là ảnh có ngay, không nhấp nháy.
-  if (typeof wiPrefetch === 'function') { const nx = fcQueue.items[1]; if (nx) wiPrefetch(nx.hz); }
   document.getElementById('fc-btns').innerHTML = `
     <button class="fc-btn btn-fail" onclick="fcAnswer(false)">❌ Chưa nhớ</button>
     <button class="fc-btn btn-ok" onclick="fcAnswer(true)">✅ Đã nhớ</button>`;

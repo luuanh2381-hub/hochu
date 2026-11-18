@@ -1,8 +1,14 @@
 # HANDOFF — trạng thái dự án
 
-Cập nhật lần cuối: 2026-11-14 · Commit: xem `git log -1`
+Cập nhật lần cuối: 2026-11-18 · Commit: xem `git log -1`
 
 **Đọc file này đầu mỗi phiên thay vì dò lại repo.** Bản đồ kiến trúc đầy đủ nằm trong `CLAUDE.md`.
+## V174 — Gỡ TOÀN BỘ ảnh gợi nhớ (2026-11-18, đã chạy test thuần; CHƯA thử trên trình duyệt thật / Vercel)
+Xoá `js/word-image*.js`, `lib/word-images.js`, `lib/r2.js`, 3 test (v142/v144/v151); bỏ 6 route + cron `task=images` trong `api/index.js`; bỏ nhóm cấu hình `image` ở `lib/ai-config.js` + `js/admin-ai.js`; bỏ ô ảnh/nút "Tạo ảnh"/prefetch ở `review.js`, `flashcard.js`; bỏ khung quản trị ảnh ở `admin.js`, CSS `.wi-*`, 3 thẻ script. Các mục V142/V143/V144/V151 bên dưới chỉ còn là LỊCH SỬ. `lib/r2.js` không còn (không còn code nào dùng R2). Chi tiết + việc dọn phía hạ tầng: `CHANGES-V174.md`. Bảng `word_images` vẫn còn trong DB cho tới khi chạy tuỳ chọn `migrations/V174_drop_word_images.sql`.
+
+## V173 — Màn đáp án "Hôm nay học": bỏ nội dung lặp (2026-11-18, đã chạy test thuần; CHƯA thử trên trình duyệt thật)
+Câu Hán/nghĩa cả câu trước hiện 3 lần + dòng tóm tắt từ lặp ngay dưới chữ/pinyin/nghĩa. Nay `rvSentenceBlockHtml` là chỗ DUY NHẤT hiện câu + pinyin + nghĩa, kèm "📚 Từ mới trong câu" ngay dưới (tra theo `zh` qua `rvSentenceWords`, vì `q.sentence` không mang `words`). `rvExplainHtml` lọc dòng lặp (chỉ ở review.js, `q.explanation` giữ nguyên cho màn Kỹ năng). Khối `.rv-ex` chỉ hiện khi câu hỏi không có câu thật. Test: `npm run test:v173`. Xem `CHANGES-V173.md`.
+
 ## V154 — Sửa gốc lỗi `relation "conversations" does not exist` (2026-11-14, đã chạy test trên Postgres 16 thật; CHƯA chạy trên Neon thật)
 **Gốc rễ:** `ensureConversationGenSchema()` (V152) chỉ `ALTER TABLE conversations` — Neon chưa chạy `V145_conversation_library.sql` thì bảng không có; các hàm tiến độ/yêu thích còn không đảm bảo gì.
 **Nay:** `lib/conversation-schema.js` là nguồn duy nhất: kiểm tra catalog → thiếu thì 1 transaction (advisory lock 152001, kiểm tra lại trong khoá) tạo bảng thiếu đúng V145 + áp đủ V152 → COMMIT; lỗi → ROLLBACK + `ConversationSchemaError` (category `connection|permission|missing_table|missing_column|migration`, đã lọc DATABASE_URL/mật khẩu/host). Đủ cấu trúc thì KHÔNG chạy DDL (user DB chỉ DML vẫn dùng được). Không DROP/TRUNCATE/DELETE, không chèn mẫu, không tự chạy batch.

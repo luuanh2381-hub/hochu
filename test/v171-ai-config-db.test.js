@@ -24,7 +24,7 @@ const STUB = /^(ts-fsrs|\.\/fsrs|\.\/fsrs-auto-rating|\.\/skill-store|\.\/word-n
       const r = await D.getAiConfigRow(); assert.deepStrictEqual(r.data, {}); assert.strictEqual(r.updatedBy, null);
     });
     await t('lưu → đọc lại đúng (kể cả tiếng Việt/JSON lồng), ghi lại là CẬP NHẬT chứ không thêm dòng', async () => {
-      const p1 = C.applyPatch({}, { text: { baseUrl: 'https://api.groq.com/openai/v1', models: 'llama-3.3-70b-versatile\nmixtral', apiKey: 'gsk-test-key-123456' }, image: { steps: 3 } });
+      const p1 = C.applyPatch({}, { text: { baseUrl: 'https://api.groq.com/openai/v1', models: 'llama-3.3-70b-versatile\nmixtral', apiKey: 'gsk-test-key-123456' } });
       await D.saveAiConfigRow(p1.stored, 'tuananh');
       let r = await D.getAiConfigRow();
       assert.deepStrictEqual(r.data.text.models, ['llama-3.3-70b-versatile', 'mixtral']); assert.strictEqual(r.data.text.apiKey, 'gsk-test-key-123456'); assert.strictEqual(r.updatedBy, 'tuananh');

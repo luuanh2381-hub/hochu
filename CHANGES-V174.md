@@ -1,0 +1,6 @@
+# V174 — Gỡ TOÀN BỘ tính năng "ảnh gợi nhớ"
+Xoá: js/word-image.js, js/word-image-admin.js, js/word-image-audit.js, lib/word-images.js, lib/r2.js, test/v142-word-images.test.js, test/v144-word-image-admin.test.js, test/v151-image-button.test.js.
+Sửa: api/index.js (bỏ 6 route /api/word-image + /api/admin/word-images/*, cron ?task=images, require r2/word-images/audit), lib/ai-config.js + js/admin-ai.js (bỏ nhóm cấu hình "image" Cloudflare), js/admin.js (bỏ khung quản trị ảnh), js/review.js + js/flashcard.js (bỏ ô ảnh, nút 🖼️ Tạo ảnh, tải trước ảnh), index.html (3 script), css/styles.css (khối .wi-*), test/v143, v148, v171*, package.json, scripts/verify.js, HUONG-DAN-VERCEL.md, docs/HANDOFF.md.
+Mới: migrations/V174_drop_word_images.sql (TUỲ CHỌN — xoá bảng word_images; không tự chạy).
+Không đụng: FSRS, âm thanh, từ vựng, hội thoại. Khóa cache IndexedDB giữ nguyên.
+Việc còn lại phía bạn (không bắt buộc): xoá biến môi trường CF_AI_TOKEN / CF_ACCOUNT_ID / CF_AI_IMAGE_* / R2_* trên Vercel; xoá bucket/ảnh trên Cloudflare R2; bỏ bước `task=images` ở workflow GitHub Actions nếu có (repo này không chứa workflow); gỡ gói @aws-sdk/client-s3 + @aws-sdk/s3-request-presigner bằng `npm uninstall` rồi commit lại package-lock.json (chưa làm vì cần mạng để cập nhật lock).

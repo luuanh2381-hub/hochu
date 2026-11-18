@@ -56,18 +56,10 @@ function aicSpeechHtml() {
     <div style="margin-bottom:10px"><button type="button" class="btn btn-sm" onclick="aicTest('speech','',this)">▶ Kiểm tra key + model đã lưu</button> <span class="aic-res" style="font-size:.76rem"></span></div>`;
   return aicBox('🎤 Chấm phát âm bằng giọng nói (Google Gemini)', inner, 'speech', 'aic-msg-speech');
 }
-function aicImageHtml() {
-  const i = aiCfg.image;
-  const inner = `${aicSecret('aic-image-token', 'Cloudflare API token (quyền Workers AI)', i.token, 'image', 'clearToken')}
-    ${aicInput('aic-image-account', 'Cloudflare Account ID', i.accountId, { src: i.sources.accountId })}
-    ${aicInput('aic-image-model', 'Model vẽ ảnh', i.model, { src: i.sources.model, placeholder: '@cf/black-forest-labs/flux-1-schnell' })}
-    ${aicInput('aic-image-steps', 'Số bước vẽ (1–8)', i.steps, { type: 'number', src: i.sources.steps })}`;
-  return aicBox('🖼️ Vẽ ảnh gợi nhớ (Cloudflare Workers AI)', inner, 'image', 'aic-msg-image');
-}
 function aicRender() {
   const root = document.getElementById('aic-root'); if (!root) return;
   if (!aiCfg) { root.innerHTML = '<div style="color:var(--muted);text-align:center;padding:12px">Đang tải…</div>'; return; }
-  root.innerHTML = aicTextHtml() + aicSpeechHtml() + aicImageHtml();
+  root.innerHTML = aicTextHtml() + aicSpeechHtml();
 }
 function aiCfgPanelHtml() {
   return `<div class="panel" id="aic-panel">
@@ -99,7 +91,7 @@ function aicPreset(id) {
 function aicPatch(section) {
   if (section === 'text') return { text: { baseUrl: aicVal('aic-baseurl'), models: aicVal('aic-models'), minIntervalMs: aicVal('aic-interval'), reasoning: aicVal('aic-reasoning'), apiKey: aicVal('aic-text-key') } };
   if (section === 'speech') return { speech: { model: aicVal('aic-speech-model'), minIntervalMs: aicVal('aic-speech-interval'), apiKey: aicVal('aic-speech-key') } };
-  return { image: { accountId: aicVal('aic-image-account'), model: aicVal('aic-image-model'), steps: aicVal('aic-image-steps'), token: aicVal('aic-image-token') } };
+  return {};
 }
 async function aicPost(section, body, okText) {
   if (aiCfgBusy) return; aiCfgBusy = true; aicMsg(section, '<span style="color:var(--muted)">Đang lưu…</span>');

@@ -271,13 +271,9 @@
   .fc-front,.fc-back{position:absolute;inset:0;background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.5);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;backface-visibility:hidden;}
   html[data-theme="dark"] .fc-front,html[data-theme="dark"] .fc-back{box-shadow:var(--shadow-md);}
   .fc-back{transform:rotateY(180deg);overflow-y:auto;}
-  /* V143: ảnh gợi nhớ trong thẻ Flashcard — thu nhỏ để chữ Hán/nghĩa vẫn nằm trong thẻ, cuộn được nếu tràn.
-     ::before/::after + margin:auto = vẫn canh giữa khi thẻ thấp, KHÔNG bị cắt mất phần trên khi thẻ cao
+  /* Căn giữa nội dung mặt sau: ::before/::after + margin:auto = vẫn canh giữa khi thẻ thấp, KHÔNG bị cắt mất phần trên khi thẻ cao
      (justify-content:center + overflow sẽ làm mất đầu nội dung — lỗi flexbox đã biết). */
   .fc-back::before,.fc-back::after{content:'';margin:auto;}
-  .fc-back .wi-wrap{margin-top:2px}
-  .fc-back .wi-img{height:min(16vh,120px)}
-  .fc-back .wi-story{display:none}
   .fc-hz{font-size:3.2rem;font-weight:900;line-height:1;}
   .fc-hz-back{font-size:2.1rem;font-weight:900;line-height:1;}
   .fc-py{font-size:1rem;color:var(--muted);font-style:italic;}
@@ -619,34 +615,6 @@
 .adm-create-msg.ok{color:var(--l8a,#3f9e00)}
 .adm-create-msg.err{color:var(--l10a,#c0392b)}
 
-/* V142 — ảnh gợi nhớ · V143: ảnh hiện NGAY trong thẻ học, cao tối đa ~30vh để không đẩy chữ Hán/nghĩa
-   ra khỏi màn hình điện thoại; chạm ảnh để xem lớn. */
-.wi-wrap{width:100%;max-width:520px;margin:6px auto 0;padding:0 4px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:6px;}
-/* Ô chờ ảnh: rỗng thì không chiếm chỗ (không để khoảng trống lớn khi từ chưa có ảnh). */
-.wi-slot:empty{display:none;}
-.wi-imgbtn{padding:0;border:0;background:none;line-height:0;max-width:100%;cursor:zoom-in;-webkit-tap-highlight-color:transparent;}
-.wi-imgbtn:active .wi-img{transform:scale(.98);}
-.wi-img{display:block;height:min(30vh,220px);width:auto;max-width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;background:rgba(127,127,127,.12);transition:transform .12s ease;}
-/* Điện thoại: ảnh nhỏ hơn để chữ Hán + pinyin + nghĩa + nút vẫn nằm trong một màn hình. */
-@media (max-width:480px){.wi-img{height:min(24vh,170px);}}
-.wi-story{font-size:.85rem;line-height:1.45;margin:0;max-width:460px;}
-.wi-zoom{position:fixed;inset:0;z-index:1100;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;padding:14px;}
-.wi-zoom.on{display:flex;}
-.wi-zoom img{max-width:100%;max-height:100%;object-fit:contain;border-radius:12px;}
-.wi-create{border:2px dashed var(--border,#ccc);background:none;border-radius:12px;padding:8px 14px;font-weight:800;font-size:.85rem;color:var(--active-dark,#1899d6);cursor:pointer}
-.wi-create:disabled{opacity:.6;cursor:wait}
-.wi-msg{font-size:.78rem;color:#c0392b;margin-top:6px}
-.wi-act{display:inline-flex;align-items:center;gap:6px;max-width:100%;vertical-align:middle}
-.wi-act:empty{display:none}
-.wi-hbtn{border:1.5px dashed var(--border,#ccc);background:none;border-radius:10px;padding:4px 9px;font-weight:800;font-size:.75rem;color:var(--active-dark,#1899d6);cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
-.wi-hbtn:disabled{opacity:.7;cursor:wait}
-.wi-act-done .wi-hbtn{border-style:solid;color:var(--l8a,#27ae60);cursor:default}
-.wi-hmsg{font-size:.7rem;color:#c0392b;max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.wi-hmsg:empty{display:none}
-.rv-card .wi-wrap{margin:6px auto 0}
-/* Chế độ tập trung / không gian tối đa: ưu tiên chữ Hán và đáp án → ảnh nhỏ lại nhưng vẫn thấy ngay. */
-body.sw-on .rv-card .wi-img{height:min(24vh,170px);}
-body.sw-on .rv-card .wi-story{display:none;}
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
    V117 — STUDY WORKSPACE (màn "Hôm nay học").

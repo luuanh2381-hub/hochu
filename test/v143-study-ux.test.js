@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // test/v143-study-ux.test.js — V143: bố cục màn "Hôm nay học"
-//   A. Ảnh gợi nhớ hiện NGAY trong thẻ học (không còn mục gập phải chạm mới thấy), có giới hạn chiều cao.
-//   B. Vị trí ảnh trong thẻ: sau chữ Hán + pinyin, TRƯỚC nghĩa — và KHÔNG xuất hiện ở màn câu hỏi (lộ đáp án).
+//   (V173: đã gỡ các phần A/B về ảnh gợi nhớ vì tính năng ảnh gợi nhớ bị bỏ.)
 //   C. Màn "Hôm nay học": cài đặt hằng ngày gập sẵn; giới hạn ngày vẫn hiện khi không có thanh tiến độ.
 const assert = require('assert');
 const fs = require('fs');
@@ -18,47 +17,7 @@ async function runAll() {
   }
   console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);
 }
-const WI = read('js/word-image.js'), REVIEW = read('js/review.js'), FC = read('js/flashcard.js'), CSS = read('css/styles.css');
-
-// ── A. Ảnh không còn bị giấu sau <details> ──
-test('A1 ảnh vẽ trực tiếp, không còn <details>/<summary> phải chạm mới thấy', () => {
-  const body = WI.slice(WI.indexOf('function render('), WI.indexOf('function isAdmin('));
-  assert.ok(!/<details/.test(body), 'không được gập ảnh sau <details>');
-  assert.ok(/<img class="wi-img"/.test(body));
-});
-test('A2 chạm ảnh để xem lớn (nút bàn phím dùng được), mở bằng overlay dùng lại URL đã ký', () => {
-  assert.ok(/class="wi-imgbtn"/.test(WI) && /function wiZoom\(/.test(WI) && /g\.wiZoom = wiZoom/.test(WI));
-  assert.ok(/wi-zoom/.test(CSS) && /\.wi-zoom\.on\{display:flex/.test(CSS));
-});
-test('A3 chiều cao ảnh có trần theo màn hình (không lấn chữ Hán), và có biến thể nhỏ hơn cho điện thoại', () => {
-  assert.ok(/\.wi-img\{[^}]*height:min\(30vh,220px\)/.test(CSS), 'thiếu trần chiều cao mặc định');
-  assert.ok(/@media \(max-width:480px\)\{\.wi-img\{height:min\(24vh,170px\)/.test(CSS), 'thiếu biến thể điện thoại');
-});
-test('A4 từ không có ảnh: ô chờ không chiếm chỗ, ảnh lỗi thì tự gỡ ô', () => {
-  assert.ok(/\.wi-slot:empty\{display:none;\}/.test(CSS));
-  assert.ok(/onerror="this\.closest\(\\'\.wi-slot\\'\)\.remove\(\)"/.test(WI));
-});
-test('A5 tải trước ảnh thẻ kế tiếp ở cả "Hôm nay học" và Flashcard', () => {
-  assert.ok(/function wiPrefetch\(/.test(WI) && /g\.wiPrefetch = wiPrefetch/.test(WI));
-  assert.ok(/wiPrefetch\(rvQueue\.items\[1\]/.test(REVIEW.replace(/\s+/g, ' ')) || /wiPrefetch\(nx\.word\.hz\)/.test(REVIEW));
-  assert.ok(/wiPrefetch\(nx\.hz\)/.test(FC));
-});
-
-// ── B. Vị trí ảnh trong thẻ ──
-test('B1 thẻ từ mới: Hán → pinyin → ẢNH → nghĩa → Hán Việt', () => {
-  const html = REVIEW.slice(REVIEW.indexOf('function rvIntroHtml'), REVIEW.indexOf('function rvMatchHtml'));
-  const order = ['rv-hz', 'rv-py', 'wiSlot(w.hz)', 'rv-vi', 'rv-hv'].map(k => { const i = html.indexOf(k); assert.ok(i > 0, 'thiếu ' + k); return i; });
-  assert.deepStrictEqual(order, order.slice().sort((a, b) => a - b), 'ảnh phải nằm sau pinyin và trước nghĩa: ' + order.join(','));
-});
-test('B2 màn đáp án (ôn tập + luyện bổ sung): ảnh cũng sau pinyin, trước nghĩa', () => {
-  const rest = REVIEW.slice(REVIEW.indexOf('function rvMatchHtml')); // bỏ rvIntroHtml (đã kiểm ở B1)
-  const n = (rest.match(/rv-py[\s\S]{0,120}?wiSlot\(w\.hz\)[\s\S]{0,60}?rv-vi/g) || []).length;
-  assert.strictEqual(n, 2, 'có ' + n + ' màn đáp án đặt đúng vị trí (cần 2: luyện bổ sung + ôn tập)');
-});
-test('B3 KHÔNG hiện ảnh ở màn câu hỏi (tránh lộ đáp án trước khi trả lời)', () => {
-  const q = REVIEW.slice(REVIEW.indexOf('function rvQuestionBodyHtml'), REVIEW.indexOf('function rvCorrectionHtml'));
-  assert.ok(q.length > 100 && !/wiSlot/.test(q));
-});
+// (V173: không còn dùng REVIEW/FC/CSS sau khi gỡ phần ảnh gợi nhớ)
 
 // ── C. Màn "Hôm nay học" ──
 function lessonEnv() {

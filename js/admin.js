@@ -126,21 +126,6 @@ function renderVocabAdmin() {
     <div id="hanzi-progress-area" style="color:var(--muted);padding:14px 0;text-align:center;">Đang tải...</div>
   </div>
   <div class="panel">
-    <div class="panel-title">🖼️ Ảnh gợi nhớ (FLUX.1 schnell → Cloudflare R2)</div>
-    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px;line-height:1.5;">
-      AI soạn câu chuyện gợi nhớ + vẽ ảnh minh hoạ cho từng từ, hiện ngay trong thẻ học ở Flashcard và Ôn tập. Hạn mức miễn phí của Cloudflare có hạn (khoảng vài trăm ảnh/ngày), nên việc chạy nhiều lượt trong nhiều ngày là bình thường.
-    </div>
-    <button class="btn btn-sm" style="background:var(--l9c);color:var(--l9a);margin-bottom:12px;" id="gen-wi-btn" onclick="triggerWordImageGeneration()">🚀 Chạy sinh ảnh ngay</button>
-    <div id="gen-wi-result" style="font-size:.8rem;color:var(--muted);margin-bottom:10px;"></div>
-    <div id="wi-progress-area" style="color:var(--muted);padding:14px 0;text-align:center;">Đang tải...</div>
-    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
-      <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px;">Tạo lại ảnh cho từ cụ thể (nhập chữ Hán, cách nhau bằng dấu cách hoặc phẩy):</div>
-      <input id="wi-regen-input" type="text" placeholder="好 你好 学习" style="width:100%;max-width:320px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;">
-      <br><button class="btn btn-sm" id="wi-regen-btn" onclick="regenWordImages()">♻️ Xoá bản cũ và tạo lại</button>
-    </div>
-  </div>
-  ${typeof wiaPanelHtml === 'function' ? wiaPanelHtml() : ''}
-  <div class="panel">
     <div class="panel-title">📋 Danh sách bài đã có (sửa/xoá từng từ, hoặc xoá cả bài)</div>
     <div id="vocab-list-area" style="color:var(--muted);padding:14px 0;text-align:center;">Đang tải...</div>
   </div>
@@ -171,79 +156,6 @@ function bindVocabAdmin() {
   loadHanVietProgress();
   loadWordExampleProgress(); searchWordExamples();
   loadHanziPartsProgress();
-  if (typeof wiaInit === 'function') wiaInit(); // V144: thống kê + kiểm tra + hàng đợi ảnh gợi nhớ
-  loadWordImageStatus();
-}
-
-// ── V142: Ảnh gợi nhớ ──
-async function loadWordImageStatus() {
-  const area = document.getElementById('wi-progress-area');
-  if (!area) return;
-  try {
-    const res = await fetch('/api/admin/word-images/status', { headers: authHeaders() });
-    const d = await res.json();
-    if (!d.ok) { area.textContent = d.error || 'Không tải được dữ liệu.'; return; }
-    const c = d.counts || {};
-    const warn = d.configured ? '' : `<div style="margin-bottom:8px;padding:8px 10px;background:#fff4e0;border-radius:10px;color:#9a6200;font-size:.78rem;">⚠️ Chưa cấu hình, thiếu biến môi trường: <b>${escapeHtml((d.missingEnv || []).join(', '))}</b></div>`;
-    area.innerHTML = warn + `<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:.82rem;font-weight:700;justify-content:center;">
-      <span>✅ ${c.ready || 0} xong</span><span>📝 ${c.prompted || 0} chờ vẽ</span>
-      <span>🎨 ${c.generating || 0} đang vẽ</span><span>✍️ ${c.drafting || 0} đang soạn</span>
-      <span style="color:#c0392b">❌ ${c.failed || 0} lỗi</span></div>`;
-  } catch (e) {
-    area.textContent = 'Không kết nối được máy chủ: ' + e.message;
-  }
-}
-function wiResultHtml(d) {
-  if (d.notConfigured) return `❌ Chưa cấu hình: ${escapeHtml(d.notConfigured.join(', '))}`;
-  let s = `✅ Soạn prompt ${d.drafted} từ, vẽ xong ${d.generated} ảnh${d.failed ? `, lỗi ${d.failed}` : ''}. Còn ${d.pendingDraft} từ chưa soạn.`;
-  if (d.quota) s += ' ⏸️ Đã hết hạn mức Cloudflare hôm nay — thử lại sau 00:00 UTC (07:00 giờ VN).';
-  if (Array.isArray(d.errorSamples) && d.errorSamples.length) {
-    s += `<div style="margin-top:8px;padding:10px 12px;background:#fdecea;border-radius:10px;color:#c0392b;font-size:.78rem;"><b>Chi tiết lỗi:</b><ul style="margin:6px 0 0;padding-left:18px;">${d.errorSamples.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul></div>`;
-  }
-  return s;
-}
-async function triggerWordImageGeneration(only) {
-  const btn = document.getElementById('gen-wi-btn');
-  const resultEl = document.getElementById('gen-wi-result');
-  btn.disabled = true;
-  btn.textContent = '⏳ Đang chạy... (có thể mất tới 50 giây, đừng rời trang)';
-  resultEl.textContent = '';
-  try {
-    const res = await fetch('/api/admin/word-images/generate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(Array.isArray(only) && only.length ? { hz: only } : {}),
-    });
-    const d = await res.json();
-    resultEl.innerHTML = d.ok ? wiResultHtml(d) : `❌ ${escapeHtml(d.error || 'Có lỗi xảy ra')}`;
-    loadWordImageStatus();
-  } catch (e) {
-    resultEl.innerHTML = `❌ Không kết nối được máy chủ: ${escapeHtml(e.message)}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🚀 Chạy sinh ảnh ngay';
-  }
-}
-async function regenWordImages() {
-  const input = document.getElementById('wi-regen-input');
-  const resultEl = document.getElementById('gen-wi-result');
-  const list = [...new Set((input.value.match(/[一-鿿]+/g) || []).filter(h => h.length <= 8))].slice(0, 20);
-  if (!list.length) { resultEl.textContent = 'Hãy nhập ít nhất 1 từ chữ Hán.'; return; }
-  if (!confirm(`Xoá bản cũ và tạo lại ảnh cho ${list.length} từ: ${list.join(' ')}?`)) return;
-  const btn = document.getElementById('wi-regen-btn');
-  btn.disabled = true;
-  try {
-    const res = await fetch('/api/admin/word-images/reset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ hz: list }),
-    });
-    const d = await res.json();
-    if (!d.ok) { resultEl.innerHTML = `❌ ${escapeHtml(d.error || 'Có lỗi xảy ra')}`; return; }
-    await triggerWordImageGeneration(list);
-  } catch (e) {
-    resultEl.innerHTML = `❌ Không kết nối được máy chủ: ${escapeHtml(e.message)}`;
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 // ════════════════════════════════════════════════════

@@ -416,7 +416,9 @@ test('Mọi route API của bản gốc vẫn còn [case 16]', () => {
   const orig = readBaselineApi();
   const routeSet = (s) => new Set([...s.matchAll(/app\.(get|post|put|delete)\('([^']+)'/g)].map(m => m[1] + ' ' + m[2]));
   const before = routeSet(orig), after = routeSet(api);
-  for (const r of before) assert.ok(after.has(r), 'mất route: ' + r);
+  // V174: route ảnh gợi nhớ được gỡ CÓ CHỦ ĐÍCH (không còn tính năng) — mọi route khác vẫn phải còn.
+  const removedOnPurpose = /^(get|post) \/api\/(word-image$|admin\/word-images\/)/;
+  for (const r of before) if (!removedOnPurpose.test(r)) assert.ok(after.has(r), 'mất route: ' + r);
 });
 test('Các chế độ học vẫn gửi quizType + selectedAnswer cho FSRS; Flashcard không gắn nhãn kỹ năng [case 14]', () => {
   for (const f of ['quiz', 'type', 'listen']) {

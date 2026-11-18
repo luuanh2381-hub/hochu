@@ -8,28 +8,28 @@ const pending = []; const test = (n, f) => pending.push({ n, f });
 let passed = 0, failed = 0;
 
 test('ưu tiên: DB > biến môi trường > mặc định, kèm nguồn từng trường', () => {
-  const env = { AI_API_KEY: 'envkey-12345', AI_MODELS: 'm-env1, m-env2', AI_MIN_INTERVAL_MS: '5000', GEMINI_API_KEY: 'gem-env-123', GEMINI_MODEL: 'g-env', CF_AI_TOKEN: 'cf-env-123', R2_ACCOUNT_ID: 'acct-env-1' };
+  const env = { AI_API_KEY: 'envkey-12345', AI_MODELS: 'm-env1, m-env2', AI_MIN_INTERVAL_MS: '5000', GEMINI_API_KEY: 'gem-env-123', GEMINI_MODEL: 'g-env' };
   const e = C.resolve({}, env);
   assert.deepStrictEqual(e.text.models, ['m-env1', 'm-env2']); assert.strictEqual(e.text.minIntervalMs, 5000);
   assert.strictEqual(e.text.sources.models, 'env'); assert.strictEqual(e.text.sources.baseUrl, 'default'); assert.strictEqual(e.text.sources.apiKey, 'env');
-  assert.strictEqual(e.speech.model, 'g-env'); assert.strictEqual(e.image.accountId, 'acct-env-1'); assert.strictEqual(e.image.steps, 4);
-  const d = C.resolve({ text: { models: ['m-db'], apiKey: 'dbkey-12345', minIntervalMs: 0, baseUrl: 'https://api.groq.com/openai/v1' }, speech: { model: 'g-db' }, image: { steps: 6 } }, env);
+  assert.strictEqual(e.speech.model, 'g-env');
+  const d = C.resolve({ text: { models: ['m-db'], apiKey: 'dbkey-12345', minIntervalMs: 0, baseUrl: 'https://api.groq.com/openai/v1' }, speech: { model: 'g-db' } }, env);
   assert.deepStrictEqual(d.text.models, ['m-db']); assert.strictEqual(d.text.apiKey, 'dbkey-12345'); assert.strictEqual(d.text.minIntervalMs, 0, 'cho phép 0 ms');
-  assert.strictEqual(d.text.provider, 'groq'); assert.strictEqual(d.text.sources.models, 'admin'); assert.strictEqual(d.speech.model, 'g-db'); assert.strictEqual(d.image.steps, 6);
+  assert.strictEqual(d.text.provider, 'groq'); assert.strictEqual(d.text.sources.models, 'admin'); assert.strictEqual(d.speech.model, 'g-db');
   assert.strictEqual(d.speech.apiKey, 'gem-env-123', 'trường không lưu ở DB vẫn lấy từ env');
 });
-test('không có gì → y như hành vi cũ (OpenRouter, openrouter/free, 3500ms, Gemini 13000ms, FLUX 4 bước)', () => {
+test('không có gì → y như hành vi cũ (OpenRouter, openrouter/free, 3500ms, Gemini 13000ms)', () => {
   const r = C.resolve(null, undefined);
   assert.strictEqual(r.text.baseUrl, 'https://openrouter.ai/api/v1'); assert.deepStrictEqual(r.text.models, ['openrouter/free']);
   assert.strictEqual(r.text.minIntervalMs, 3500); assert.strictEqual(r.text.reasoning, 'low'); assert.strictEqual(r.text.provider, 'openrouter');
   assert.strictEqual(r.speech.minIntervalMs, 13000); assert.strictEqual(r.speech.model, 'gemini-3.5-flash');
-  assert.strictEqual(r.image.model, '@cf/black-forest-labs/flux-1-schnell'); assert.strictEqual(r.image.steps, 4);
+  assert.ok(!('image' in r), 'nhóm image (ảnh gợi nhớ) đã gỡ ở V173');
 });
 test('applyPatch: kiểm tra đầu vào (https, tên model, giãn cách, bước, khoá) và KHÔNG sửa đối tượng gốc', () => {
   const orig = { text: { models: ['a'] } }; const snap = JSON.stringify(orig);
-  const bad = C.applyPatch(orig, { text: { baseUrl: 'http://evil.example.com/v1', models: 'ok-model, bad model!', minIntervalMs: -1, reasoning: 'max', apiKey: 'short' }, speech: { minIntervalMs: 'abc' }, image: { steps: 99, accountId: 'x', token: 'has space token' } });
+  const bad = C.applyPatch(orig, { text: { baseUrl: 'http://evil.example.com/v1', models: 'ok-model, bad model!', minIntervalMs: -1, reasoning: 'max', apiKey: 'short' }, speech: { minIntervalMs: 'abc' } });
   const fields = bad.errors.map((x) => x.field).sort();
-  assert.deepStrictEqual(fields, ['image.accountId', 'image.steps', 'image.token', 'speech.minIntervalMs', 'text.apiKey', 'text.baseUrl', 'text.minIntervalMs', 'text.models', 'text.reasoning']);
+  assert.deepStrictEqual(fields, ['speech.minIntervalMs', 'text.apiKey', 'text.baseUrl', 'text.minIntervalMs', 'text.models', 'text.reasoning']);
   assert.strictEqual(JSON.stringify(orig), snap);
   assert.ok(C.applyPatch({}, { text: { baseUrl: 'http://localhost:11434/v1' } }).errors.length === 0, 'http chỉ cho localhost');
   assert.ok(C.applyPatch({}, { text: { baseUrl: 'https://user:pw@x.com/v1' } }).errors.length === 1, 'không nhận URL có tài khoản');
@@ -46,21 +46,18 @@ test('applyPatch: trường rỗng xoá ghi đè; khoá rỗng = GIỮ; clearKey
   assert.ok(!r.stored.text && r.stored.speech.model === 'm', 'reset chỉ xoá nhóm được chọn, nhóm khác giữ nguyên');
 });
 test('publicView KHÔNG chứa khoá ở bất kỳ đâu (chỉ đã đặt + 4 ký tự cuối)', () => {
-  const stored = { text: { apiKey: 'SECRET-TEXT-KEY-abcd' }, speech: { apiKey: 'SECRET-SPEECH-KEY-wxyz' }, image: { token: 'SECRET-CF-TOKEN-9876' } };
+  const stored = { text: { apiKey: 'SECRET-TEXT-KEY-abcd' }, speech: { apiKey: 'SECRET-SPEECH-KEY-wxyz' } };
   const j = JSON.stringify(C.publicView(stored, { AI_API_KEY: 'SECRET-ENV-KEY-1111' }));
-  for (const sec of ['SECRET-TEXT-KEY', 'SECRET-SPEECH-KEY', 'SECRET-CF-TOKEN', 'SECRET-ENV-KEY']) assert.ok(!j.includes(sec), 'lộ ' + sec);
+  for (const sec of ['SECRET-TEXT-KEY', 'SECRET-SPEECH-KEY', 'SECRET-ENV-KEY']) assert.ok(!j.includes(sec), 'lộ ' + sec);
   const v = C.publicView(stored, {});
-  assert.deepStrictEqual(v.text.apiKey, { set: true, source: 'admin', tail: '••••abcd' }); assert.strictEqual(v.image.token.tail, '••••9876');
+  assert.deepStrictEqual(v.text.apiKey, { set: true, source: 'admin', tail: '••••abcd' });
   assert.deepStrictEqual(C.publicView({}, {}).text.apiKey, { set: false, source: 'none', tail: '' });
   assert.strictEqual(C.publicView({}, { AI_API_KEY: 'envkey-12345' }).text.apiKey.source, 'env');
 });
-test('imageEnv: phủ cấu hình hiệu lực lên env để lib/word-images.js dùng được không cần sửa', () => {
-  const wi = require('../lib/word-images.js');
-  const r = C.resolve({ image: { token: 'cf-token-12345', accountId: 'acct-db-001', model: '@cf/x/y', steps: 2 } }, {});
-  const env = C.imageEnv(r, { R2_BUCKET: 'b' });
-  assert.strictEqual(env.R2_BUCKET, 'b');
-  assert.strictEqual(env.CF_AI_TOKEN, 'cf-token-12345'); assert.strictEqual(env.CF_ACCOUNT_ID, 'acct-db-001'); assert.strictEqual(env.CF_AI_IMAGE_MODEL, '@cf/x/y'); assert.strictEqual(env.CF_AI_IMAGE_STEPS, '2');
-  if (typeof wi.fluxConfig === 'function') { const f = wi.fluxConfig(env); assert.strictEqual(f.token, 'cf-token-12345'); assert.strictEqual(f.steps, 2); }
+test('V173: nhóm cấu hình image (ảnh gợi nhớ) đã gỡ — publicView/applyPatch không còn, bản vá image bị bỏ qua', () => {
+  assert.ok(!('image' in C.publicView({}, {})) && typeof C.imageEnv === 'undefined' && typeof C.DEFAULT_IMAGE_MODEL === 'undefined');
+  const r = C.applyPatch({}, { image: { steps: 3, token: 'abcdefgh12345' } });
+  assert.deepStrictEqual(r.errors, []); assert.deepStrictEqual(r.stored, {}, 'không lưu gì cho nhóm đã gỡ');
 });
 
 // ── doCallAi thật (trích từ api/index.js) chạy với server HTTP cục bộ giả ──
@@ -110,25 +107,25 @@ test('doCallAi: URL sai → lỗi nghiêm trọng (fatal) có thông báo tiến
 });
 
 // ── Nối dây server / giao diện ──
-test('server: route chỉ superadmin, không trả khoá, nhật ký không ghi giá trị khoá, callGemini đọc cấu hình DB, ảnh/phát âm dùng cấu hình', () => {
+test('server: route chỉ superadmin, không trả khoá, nhật ký không ghi giá trị khoá, callGemini đọc cấu hình DB, chấm phát âm dùng cấu hình', () => {
   for (const r of ["app.get('/api/admin/ai-config'", "app.post('/api/admin/ai-config'", "app.post('/api/admin/ai-config/test'"]) assert.ok(api.includes(r), r);
   assert.ok(/async function aiConfigSuper[\s\S]{0,300}requireSuperAdmin/.test(api), 'phải yêu cầu superadmin');
   const a = api.indexOf("app.get('/api/admin/ai-config'"); const seg = api.slice(a, api.indexOf('// ── [SUPERADMIN] Tạo tài khoản cho người khác'));
   assert.ok(/publicView\(/.test(seg) && !/res\.json\([^)]*apiKey/.test(seg), 'chỉ trả publicView');
   assert.ok(/redactSecrets/.test(seg), 'lỗi từ nhà cung cấp phải che khoá');
   assert.ok(/async function callGemini\(prompt, opts\)\s*\{\s*const cfg = \(await getAiRuntime\(\)\)\.text/.test(api));
-  assert.ok(/callGeminiWithAudio[\s\S]{0,200}getAiRuntime\(\)\)\.speech/.test(api) && /env: \(\) => aiConfigLib\.imageEnv\(/.test(api));
+  assert.ok(/callGeminiWithAudio[\s\S]{0,200}getAiRuntime\(\)\)\.speech/.test(api));
   assert.ok(!/process\.env\.GEMINI_API_KEY/.test(api.replace(/\/\/.*$/gm, '')), 'khóa Gemini không còn đọc thẳng từ env trong api');
   assert.ok(/ai_config/.test(read('lib/db.js')) && /getAiConfigRow, saveAiConfigRow/.test(read('lib/db.js')));
 });
 test('redactSecrets che mọi khoá đang dùng khỏi thông báo lỗi', () => {
   const a = api.indexOf('function redactSecrets('); const b = api.indexOf('async function aiConfigSuper');
   const ctx = { String }; vm.createContext(ctx); vm.runInContext(api.slice(a, b) + '\nthis.f = redactSecrets;', ctx);
-  const rt = C.resolve({ text: { apiKey: 'sk-super-secret-1' }, speech: { apiKey: 'gem-super-secret' }, image: { token: 'cf-super-secret-1' } }, {});
-  const m = ctx.f('401 bad key sk-super-secret-1 and gem-super-secret and cf-super-secret-1', rt);
+  const rt = C.resolve({ text: { apiKey: 'sk-super-secret-1' }, speech: { apiKey: 'gem-super-secret' } }, {});
+  const m = ctx.f('401 bad key sk-super-secret-1 and gem-super-secret', rt);
   assert.ok(!/super-secret/.test(m) && /••••/.test(m));
 });
-test('giao diện admin-ai.js: dựng đủ 3 khối, hiển thị nguồn + chỉ 4 ký tự cuối, không có khoá; chỉ superadmin thấy; nạp trước admin.js', () => {
+test('giao diện admin-ai.js: dựng đủ 2 khối (văn bản + phát âm; khối ảnh đã gỡ V173), hiển thị nguồn + chỉ 4 ký tự cuối, không có khoá; chỉ superadmin thấy; nạp trước admin.js', () => {
   const idx = read('index.html'); assert.ok(idx.indexOf('/js/admin-ai.js') > 0 && idx.indexOf('/js/admin-ai.js') < idx.indexOf('/js/admin.js'));
   const ad = read('js/admin.js'); assert.ok(/currentRole==='superadmin' \? aiCfgPanelHtml\(\)/.test(ad) && /aicLoad\(\)/.test(ad));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -136,9 +133,9 @@ test('giao diện admin-ai.js: dựng đủ 3 khối, hiển thị nguồn + ch�
   vm.createContext(ctx); vm.runInContext(read('js/admin-ai.js'), ctx);
   const view = C.publicView({ text: { apiKey: 'SECRET-TEXT-KEY-abcd', models: ['m-a', 'm-b'] } }, {});
   ctx.__v = view; vm.runInContext('aiCfg = __v;', ctx);
-  const html = vm.runInContext('aicTextHtml() + aicSpeechHtml() + aicImageHtml()', ctx);
+  const html = vm.runInContext('aicTextHtml() + aicSpeechHtml()', ctx);
   assert.ok(!html.includes('SECRET-TEXT-KEY'), 'không được lộ khoá'); assert.ok(html.includes('••••abcd') && html.includes('Đã lưu ở Quản trị'));
-  assert.ok(/m-a/.test(html) && /m-b/.test(html) && /▶ Thử/.test(html)); assert.ok(/Cloudflare/.test(html) && /Gemini/.test(html) && /OpenRouter/.test(html) && /Groq/.test(html));
+  assert.ok(/m-a/.test(html) && /m-b/.test(html) && /▶ Thử/.test(html)); assert.ok(!/Cloudflare/.test(html) && /Gemini/.test(html) && /OpenRouter/.test(html) && /Groq/.test(html));
   assert.ok(/id="aic-models"/.test(html) && /id="aic-baseurl"/.test(html) && /type="password"/.test(html));
 });
 (async () => {

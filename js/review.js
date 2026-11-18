@@ -645,6 +645,12 @@ function rvExWordsHtml(e) {
   return `<div class="rv-words"><div class="rv-words-t">📚 Từ mới trong câu</div>${ws.map(w =>
     `<div class="rv-words-i"><b lang="zh">${escapeHtml(w.word)}</b>${py && w.py ? ` <span class="rv-words-py">(${escapeHtml(w.py)})</span>` : ''} — ${escapeHtml(w.vi)}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div>`).join('')}</div>`;
 }
+// V173: q.sentence (QE.findSentences) chỉ copy zh/vi/py, KHÔNG mang theo `words` → tra lại "từ mới trong câu" theo nguyên văn câu trong kho ví dụ.
+function rvSentenceWords(zh) {
+  if (!zh) return [];
+  const hit = rvExamplePool.find(e => e && e.zh === zh && Array.isArray(e.words) && e.words.length);
+  return hit ? hit.words : [];
+}
 // V138 — câu CHỮ HÁN cần đọc sau khi trả lời (cả câu, không chỉ từ). Câu hỏi theo câu → câu thật của câu hỏi;
 // dạng cũ (nếu còn) → chữ Hán của từ. Dùng cho cả tự phát sau khi trả lời lẫn nút "Nghe lại câu".
 function rvAnswerSentence(q) {
@@ -664,11 +670,14 @@ function rvSentenceBlockHtml() {
   if (!q || !q.sentence || !q.sentence.zh) return '';
   const safeHz = escapeHtml(q.word.hz || ''), safeZh = escapeHtml(q.sentence.zh);
   const marked = safeHz ? safeZh.split(safeHz).join(`<mark class="rv-mark">${safeHz}</mark>`) : safeZh;
+  // V173: đây là NƠI DUY NHẤT hiện câu Hán + pinyin + nghĩa cả câu trên màn đáp án (khung giải thích và khối ví dụ không lặp lại nữa),
+  // và "Từ mới trong câu" nằm ngay dưới câu. Pinyin cả câu luôn hiện ở màn kết quả (như dòng "Pinyin cả câu" cũ trong khung giải thích).
   return `<div class="rv-sent-block">
       <div class="rv-sent">${marked}</div>
-      ${q.sentence.py && (typeof showPinyin === 'undefined' || showPinyin) ? `<div class="rv-sent-py">${escapeHtml(q.sentence.py)}</div>` : ''}
+      ${q.sentence.py ? `<div class="rv-sent-py">${escapeHtml(q.sentence.py)}</div>` : ''}
       ${q.sentence.vi ? `<div class="rv-sent-vi">${escapeHtml(q.sentence.vi)}</div>` : ''}
       <button class="btn btn-sm" onclick="rvReplaySentence()">🔊 Nghe lại câu</button>
+      ${rvExWordsHtml({ hz: q.word.hz, words: rvSentenceWords(q.sentence.zh) })}
     </div>`;
 }
 
@@ -1003,7 +1012,15 @@ function rvExplainHtml() {
       `${t.correct ? '' : `<br>Đáp án chuẩn: ${escapeHtml(q.correctKey)}`}</div>`;
   }
   // V119: bỏ dòng "Bạn vừa nghe: …" (chữ, pinyin, nghĩa, Hán Việt đã hiện ngay phía trên nên lặp lại)
-  const lines = (q.explanation || []).filter(l => !/^Bạn vừa nghe:/.test(l));
+  let lines = (q.explanation || []).filter(l => !/^Bạn vừa nghe:/.test(l));
+  // V173: bỏ những dòng LẶP lại thứ đã hiện ở khối khác cùng màn đáp án.
+  //  • Câu Hán / nghĩa cả câu / pinyin cả câu → đã nằm trong khối câu (rvSentenceBlockHtml) khi câu hỏi có câu thật.
+  //  • Dòng tóm tắt từ ("打印 (dǎyìn) = in · Hán Việt: đả ấn") → đã có ở chữ Hán/pinyin/nghĩa/Hán Việt phía trên (chỉ bỏ khi các dòng đó đang hiện).
+  if (q.sentence && q.sentence.zh) lines = lines.filter(l => !/^(Câu đầy đủ|Câu hoàn chỉnh|Nghĩa cả câu|Nghĩa|Pinyin cả câu): /.test(l));
+  const w = q.word;
+  if (w && w.hz && (typeof showMeaning === 'undefined' || showMeaning) && (!w.hanviet || rvShowHV())) {
+    lines = lines.filter(l => !(l.startsWith(w.hz + ' (') && l.includes(' = ')) && !l.startsWith(w.hz + ' đọc là '));
+  }
   if (!typedLine && !lines.length) return '';
   return `<div class="rv-explain">${typedLine}${lines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}</div>`;
 }
@@ -1136,7 +1153,6 @@ function rvIntroHtml(tagLabel, w) {
       <div class="rv-type-tag">Xem kỹ từ mới trước khi được hỏi</div>
       <div class="rv-hz">${escapeHtml(w.hz)}</div>
       <div class="rv-py">${escapeHtml(w.py || '')}</div>
-      ${typeof wiSlot === 'function' ? wiSlot(w.hz) : ''}
       <div class="rv-vi">${escapeHtml(w.vi || '')}</div>
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
       ${audioOk ? `<button id="rv-play" class="btn btn-sound btn-sm" onclick="speak('${escapeJsAttr(w.hz)}')">🔊 Nghe</button>` : ''}
@@ -1343,13 +1359,12 @@ function renderReview() {
       ${(r && r.order) ? `<div class="os-key">${escapeHtml(r.order.sentence)}</div>` : ''}
       ${rvSentenceBlockHtml()}
       <div class="rv-py">${escapeHtml(w.py || '')}</div>
-      ${typeof wiSlot === 'function' ? wiSlot(w.hz) : ''}
       ${showMeaning ? `<div class="rv-vi">${escapeHtml(w.vi || '')}</div>` : ''}
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
       ${renderHanziParts(w.hz, false, true)}
       ${rvExplainHtml()}
       ${rvAiHtml(w, r)}
-      ${(exD && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span>${rvExWordsHtml(exD)}</div>` : ''}
+      ${(exD && !(rvQuestion && (rvQuestion.typeId === 'cloze' || (rvQuestion.sentence && rvQuestion.sentence.zh)))) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span>${rvExWordsHtml(exD)}</div>` : ''}
       <div style="text-align:center;margin-top:12px"><button class="btn btn-primary" onclick="rvPracticeContinue()">Tiếp tục</button></div>`;
   } else {
     // Đã có kết quả trắc nghiệm: lộ đáp án đầy đủ + bổ sung "Highlight System Rating" — hiện lại 4
@@ -1370,14 +1385,13 @@ function renderReview() {
       ${(r && r.multi && typeof rvmResultHtml === 'function') ? rvmResultHtml(r) : ''}
       ${rvSentenceBlockHtml()}
       <div class="rv-py">${w.py || ''}</div>
-      ${typeof wiSlot === 'function' ? wiSlot(w.hz) : ''}
       ${showMeaning ? `<div class="rv-vi">${w.vi || ''}</div>` : ''}
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${w.hanviet}</div>` : ''}
       ${renderHanziParts(w.hz, false, true)}
       ${rvExplainHtml()}
       ${r && !r.correct ? rvCorrectionHtml(w, r) : ''}
       ${rvAiHtml(w, r)}
-      ${(ex && !(rvQuestion && rvQuestion.typeId === 'cloze')) ? `<div class="rv-ex">${ex.zh}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span>${rvExWordsHtml(ex)}</div>` : ''}
+      ${(ex && !(rvQuestion && (rvQuestion.typeId === 'cloze' || (rvQuestion.sentence && rvQuestion.sentence.zh)))) ? `<div class="rv-ex">${ex.zh}${rvExPy(ex)}<br><span style="color:var(--muted);font-size:.85rem;">${ex.vi}</span>${rvExWordsHtml(ex)}</div>` : ''}
       ${rvRenderRatingBar()}
       ${savedLine}
       ${(isAdminRole() && r && r.autoRating) ? `<div class="rv-saved-line">🐞 debug: auto rating = ${r.autoRating}</div>` : ''}`;
@@ -1401,10 +1415,8 @@ function renderReview() {
   else if (practice || rvPhase === 'match') parts.push(ct('📝', 'luyện bổ sung · không tính vào lịch ôn', null));
   const counter = parts.join('');
   const headAct = (typeof swHeadActionsHtml === 'function') ? swHeadActionsHtml() : '';
-  // V151: nút tạo ảnh gợi nhớ (admin, từ chưa có ảnh) ngay trên thanh đầu — có ở cả màn câu hỏi; ảnh vẫn chỉ hiện ở màn đáp án.
-  const wiAct = (typeof wiActionSlot === 'function' && cur && cur.word) ? wiActionSlot(cur.word.hz) : '';
   return `
-    <div class="rv-card" data-phase="${rvPhase}" data-ans="${(rvPhase === 'intro' || rvPhase === 'match' || rvPhase === 'question') ? '' : '1'}" data-q="${rvPhase === 'match' ? 'match' : (rvQuestion ? rvQuestion.typeId : '')}" data-kind="${(rvPhase === 'question' && rvQuestion && rvQuestion.prompt) ? rvQuestion.prompt.kind : ''}"><div class="rv-head"><div class="rv-counter rv-counter-line" role="status" aria-live="polite">${counter}</div><div class="rv-head-act">${wiAct}${headAct}</div></div><div class="rv-body">${body}</div></div>
+    <div class="rv-card" data-phase="${rvPhase}" data-ans="${(rvPhase === 'intro' || rvPhase === 'match' || rvPhase === 'question') ? '' : '1'}" data-q="${rvPhase === 'match' ? 'match' : (rvQuestion ? rvQuestion.typeId : '')}" data-kind="${(rvPhase === 'question' && rvQuestion && rvQuestion.prompt) ? rvQuestion.prompt.kind : ''}"><div class="rv-head"><div class="rv-counter rv-counter-line" role="status" aria-live="polite">${counter}</div><div class="rv-head-act">${headAct}</div></div><div class="rv-body">${body}</div></div>
   `;
 }
 
@@ -1413,10 +1425,6 @@ function renderReview() {
 // server trả lời (server vẫn là nguồn sự thật cuối cùng, việc này chỉ để phản hồi UI tức thời).
 function bindReview() {
   if (rvStage === 'start' || !rvQueue.items.length) return;
-  if (typeof wiMountAction === 'function') wiMountAction(document.querySelector('.rv-head')); // V151: nút tạo ảnh (admin)
-  if (typeof wiMount === 'function') wiMount(document.querySelector('.rv-body')); // V142: ảnh gợi nhớ (nếu đã có) — màn từ mới + màn đáp án
-  // V143: tải trước ảnh của thẻ kế tiếp để mở thẻ sau là có ảnh ngay (không tải lại ảnh đã có trong cache).
-  if (typeof wiPrefetch === 'function') { const nx = rvQueue.items[1]; if (nx && nx.word) wiPrefetch(nx.word.hz); }
   if (rvPhase === 'intro') {
     // Từ mới: tự phát âm khi có giọng đọc (nếu không có giọng thì không có nút/âm thanh giả).
     // V117: phát đúng 1 lần/thẻ, tôn trọng cài đặt "Tự phát âm"; chế độ kiểm tra trí nhớ không tự phát ở màn giới thiệu.

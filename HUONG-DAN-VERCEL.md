@@ -35,13 +35,6 @@ Dùng **Neon** (dễ nhất, có gói free, tích hợp sẵn với Vercel):
     muốn cố định thì ghi model có hậu tố `:free`, nhiều model cách nhau dấu phẩy — thử lần lượt, lỗi thì chuyển model kế),
     `AI_MIN_INTERVAL_MS` (mặc định 3500 — model free giới hạn khoảng 20 yêu cầu/phút và có hạn mức theo ngày; hết hạn mức thì
     lượt chạy dừng và tiếp tục hôm sau). Biến `OPENROUTER_API_KEY` cũng được nhận thay cho `AI_API_KEY`.
-  - **Ảnh gợi nhớ (V142)** — `CF_AI_TOKEN` = API token Cloudflare có quyền **Workers AI** (Cloudflare Dashboard →
-    My Profile → API Tokens). `CF_ACCOUNT_ID` (tuỳ chọn, mặc định dùng `R2_ACCOUNT_ID`). Ảnh lưu vào cùng bucket R2
-    (thư mục `img/v1/`), dùng model `@cf/black-forest-labs/flux-1-schnell` (tuỳ chọn đổi bằng `CF_AI_IMAGE_MODEL`,
-    số bước `CF_AI_IMAGE_STEPS`, mặc định 4). Hạn mức miễn phí của Cloudflare là theo ngày; hết hạn mức thì lượt chạy
-    tự dừng và tiếp tục hôm sau. Cron: `/api/cron/generate-daily?task=images` (đã thêm vào workflow GitHub Actions).
-    Admin: `GET /api/admin/word-images/status` (xem tiến độ + biến còn thiếu), `POST /api/admin/word-images/generate`
-    (chạy tay, body tuỳ chọn `{"hz":["好"]}`), `POST /api/admin/word-images/reset` (xoá để tạo lại).
   - `GEMINI_API_KEY` = (không bắt buộc) chỉ cần cho chấm phát âm bằng ghi âm giọng nói, vì các model
     văn bản miễn phí của OpenRouter không nhận âm thanh
   - `CRON_SECRET` = 1 chuỗi bí mật tự đặt (vd 1 chuỗi random dài) — dùng để

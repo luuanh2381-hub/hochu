@@ -4,7 +4,7 @@
 //   A. Đã xoá thư viện âm thanh (lib/audio-library.js) + 2 route (/api/audio/resolve, /api/r2/health).
 //   B. Đường âm thanh phía client: IndexedDB → POST /api/tts → Web Speech; không còn dấu vết R2.
 //   C. Python /api/tts: không còn token nội bộ; vercel.json vẫn rewrite /api/tts → /api/edge-tts.
-//   D. lib/r2.js chỉ còn phần ẢNH GỢI NHỚ (ảnh gợi nhớ chưa bị đụng tới).
+//   D. (V173) lib/r2.js đã bị gỡ hẳn cùng tính năng ảnh gợi nhớ — không còn code nào dùng Cloudflare R2.
 //   E. Khoá cache IndexedDB (AH.canonical) giữ nguyên → người học không mất cache âm thanh cũ.
 'use strict';
 const assert = require('assert');
@@ -31,10 +31,9 @@ test('api/index.js: không còn require/route của thư viện âm thanh hay /a
     assert.ok(!s.includes(bad), 'api/index.js còn chứa: ' + bad);
   }
 });
-test('api/index.js: phần ảnh gợi nhớ vẫn nguyên (headObject + presignImageGet)', () => {
+test('api/index.js: không còn đường nào dùng R2 (V173: ảnh gợi nhớ đã gỡ)', () => {
   const s = read('api/index.js');
-  assert.ok(/await r2\.headObject\(row\.storage_key\)/.test(s));
-  assert.ok(/await r2\.presignImageGet\(row\.storage_key/.test(s));
+  assert.ok(!/\br2\./.test(s) && !/word-image/.test(s));
 });
 
 console.log('\n[B] Client: Edge-TTS trực tiếp');
@@ -67,13 +66,10 @@ test('vercel.json: /api/tts → /api/edge-tts đứng TRƯỚC rewrite /api/(.*)
   assert.ok(v.functions['api/edge-tts.py'] && v.functions['api/edge-tts.py'].maxDuration >= 60);
 });
 
-console.log('\n[D] lib/r2.js: chỉ còn ảnh gợi nhớ');
-test('lib/r2.js không còn hàm MP3/âm thanh/health', () => {
-  const s = read('lib/r2.js');
-  for (const bad of ['putMp3', 'presignGet', 'storageKey', 'HEALTH_KEY', 'isMp3', 'ListObjectsV2Command', 'HeadBucketCommand', 'audio/mpeg', 'tts/v1']) {
-    assert.ok(!s.includes(bad), 'lib/r2.js còn chứa: ' + bad);
-  }
-  for (const keep of ['putImage', 'presignImageGet', 'headObject', 'imageKey', 'detectImage']) assert.ok(s.includes(keep), 'thiếu ' + keep);
+console.log('\n[D] lib/r2.js đã gỡ (V173)');
+test('lib/r2.js không còn tồn tại và api/index.js không require nó', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, 'lib/r2.js')), 'lib/r2.js phải bị xoá cùng ảnh gợi nhớ');
+  assert.ok(!/require\(['"]\.\.\/lib\/r2['"]\)/.test(read('api/index.js')));
 });
 test('package.json: bỏ script test:v141, có test:v148', () => {
   const p = JSON.parse(read('package.json'));

@@ -38,13 +38,10 @@ const skillStore = require('../lib/skill-store');
 const wordNotes = require('../lib/word-notes');
 const aiExplain = require('../lib/ai-explain'); // V119: "🤖 Hỏi AI" ở câu sai
 const ttsHints = require('../lib/tts-hints'); // V129: "Sửa phát âm" cho chữ Hán đa âm
-const r2 = require('../lib/r2'); // Cloudflare R2 — CHỈ còn dùng cho ảnh gợi nhớ (V142); âm thanh không dùng R2 (V148). Credentials CHỈ ở server
 const SWX = require('../js/sentence-words-file'); // V172: từ mới trong câu ví dụ (dùng chung client/server)
 const aiConfigLib = require('../lib/ai-config'); // V171: cấu hình AI ở màn Quản trị (DB > biến môi trường > mặc định)
-const wordImagesLib = require('../lib/word-images'); // V142: ảnh gợi nhớ (Cloudflare FLUX.1 schnell → R2)
 const orderSentence = require('../js/order-sentence'); // V135: chấm "Sắp xếp câu" (dùng CHUNG js/ với trình duyệt)
 const PROGRAM_SENTENCES = require('../js/sentences-data'); // V135: câu mẫu giáo trình — nguồn câu ĐÚNG khi chấm sắp xếp câu
-const wordImageAudit = require('../js/word-image-audit'); // V144: thống kê/kiểm tra ảnh gợi nhớ (THUẦN, dùng chung js/ với trình duyệt)
 const multiGrade = require('../lib/multi-grade'); // V131: chấm "câu 3 phần" (đúng 2/3) cho thẻ FSRS chính thức — chỉ khi client gửi `parts`
 const studyDays = require('../lib/study-days'); // V119.4: đếm số ngày đã học / số ngày từ khi tạo tài khoản
 const orphans = require('../lib/orphans');
@@ -181,8 +178,8 @@ function logActivity(username, role, action, detail) {
 // lớn) — giảm dung lượng truyền qua mạng, giúp tải nhanh hơn nhất là mạng chậm/di động.
 app.use(compression());
 app.use(express.json({ limit: '20mb' }));
-// V171: làm "nóng" cấu hình AI (cache 20 giây) trước các route dùng CF_* đồng bộ (ảnh gợi nhớ, cron) — lỗi đọc cấu hình không chặn request.
-app.use(['/api/word-image', '/api/admin/word-images', '/api/cron'], async (req, res, next) => { try { await getAiRuntime(); } catch (e) { /* dùng env */ } next(); });
+// V171: làm "nóng" cấu hình AI (cache 20 giây) trước các route dùng đồng bộ (cron) — lỗi đọc cấu hình không chặn request.
+app.use(['/api/cron'], async (req, res, next) => { try { await getAiRuntime(); } catch (e) { /* dùng env */ } next(); });
 
 // ── Xác thực: kiểm tra token, KHÔNG khoá dữ liệu (chỉ đọc) ──
 async function requireAuth(req, res) {
@@ -629,12 +626,12 @@ app.post('/api/admin/settings/registration', async (req, res) => {
 // ════════════════════════════════════════════════════
 // V171 — [SUPERADMIN] Cấu hình TẤT CẢ AI ở màn Quản trị (nhà cung cấp, URL, model, khoá…). Không cần sửa code / biến môi trường.
 //   GET  /api/admin/ai-config        : cấu hình hiệu lực + nguồn từng trường (khoá KHÔNG bao giờ trả ra; chỉ "đã đặt" + 4 ký tự cuối).
-//   POST /api/admin/ai-config        : body { text?, speech?, image? } — bản vá; xem quy ước ở lib/ai-config.js applyPatch.
+//   POST /api/admin/ai-config        : body { text?, speech? } — bản vá; xem quy ước ở lib/ai-config.js applyPatch.
 //   POST /api/admin/ai-config/test   : body { target: 'text'|'speech', model? } — gọi thử THẬT bằng cấu hình đã lưu (1 model / lần).
 // ════════════════════════════════════════════════════
 function redactSecrets(msg, rt) {
   let t = String(msg == null ? '' : msg);
-  for (const k of [rt.text.apiKey, rt.speech.apiKey, rt.image.token]) if (k && k.length >= 8) t = t.split(k).join('••••');
+  for (const k of [rt.text.apiKey, rt.speech.apiKey]) if (k && k.length >= 8) t = t.split(k).join('••••');
   return t;
 }
 async function aiConfigSuper(req, res) {
@@ -659,7 +656,7 @@ app.post('/api/admin/ai-config', async (req, res) => {
     await saveAiConfigRow(r.stored, authed.username);
     await getAiRuntime(true);
     // Ghi nhật ký KHÔNG kèm giá trị khoá — chỉ tên trường đã đổi.
-    const changed = Object.keys(req.body || {}).filter((k) => ['text', 'speech', 'image'].includes(k)).map((k) => k + ':' + Object.keys(req.body[k] || {}).filter((f) => !/key|token/i.test(f) || req.body[k][f]).join('+'));
+    const changed = Object.keys(req.body || {}).filter((k) => ['text', 'speech'].includes(k)).map((k) => k + ':' + Object.keys(req.body[k] || {}).filter((f) => !/key|token/i.test(f) || req.body[k][f]).join('+'));
     logActivity(authed.username, 'superadmin', 'admin', 'Sửa cấu hình AI (' + changed.join(', ') + ')');
     res.json({ ok: true, config: aiConfigLib.publicView(aiCfgCache.stored, process.env), updatedAt: aiCfgCache.updatedAt, updatedBy: aiCfgCache.updatedBy });
   } catch (e) { fail(res, e); }
@@ -2819,7 +2816,7 @@ const https = require('https');
 // V171: các giá trị bên dưới (model Gemini chấm phát âm, base URL / model / giãn cách / khoá AI văn bản, Cloudflare…) KHÔNG còn cố định
 // trong code: superadmin sửa ở Quản trị → "🤖 Cấu hình AI" (lưu bảng ai_config). Biến môi trường cũ vẫn là giá trị dự phòng:
 //   AI_API_KEY / OPENROUTER_API_KEY, AI_BASE_URL, AI_MODELS (cách nhau bằng dấu phẩy, thử lần lượt), AI_MIN_INTERVAL_MS,
-//   GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MIN_INTERVAL_MS, CF_AI_TOKEN, CF_ACCOUNT_ID, CF_AI_IMAGE_MODEL, CF_AI_IMAGE_STEPS.
+//   GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MIN_INTERVAL_MS.
 // Thứ tự ưu tiên: DB → biến môi trường → mặc định (xem lib/ai-config.js).
 const AI_CFG_TTL_MS = 20 * 1000; // cache theo từng instance; lưu xong instance này dùng ngay, instance khác thấy sau ≤ 20 giây
 let aiCfgCache = { at: 0, stored: null, updatedAt: null, updatedBy: null, resolved: null };
@@ -3578,152 +3575,6 @@ app.post('/api/tts/suggest', async (req, res) => {
 
 // V148 — Âm thanh: client gọi Edge-TTS TRỰC TIẾP qua POST /api/tts (rewrite → api/edge-tts.py). Không còn route/thư viện âm thanh phía Node.
 
-// ════════════════════════════════════════════════════
-// V142 — ẢNH GỢI NHỚ CHO TỪ VỰNG (Cloudflare Workers AI FLUX.1 schnell → R2, metadata ở Neon).
-//   GET  /api/word-image?hz=好              : người học — URL ký sẵn của ảnh + câu chuyện gợi nhớ (nếu đã có).
-//   POST /api/admin/word-images/generate    : admin — chạy 1 lượt sinh ảnh (body tuỳ chọn {hz:["好",...]}).
-//   GET  /api/admin/word-images/status      : admin — đếm theo trạng thái + thiếu biến môi trường nào.
-//   POST /api/admin/word-images/reset       : admin — xoá bản ghi các từ {hz:[...]} để soạn + vẽ lại.
-//   GET  /api/admin/word-images/audit       : admin — V144: thống kê ảnh theo từ/bài/nhãn (CHỈ đọc DB, không gọi R2).
-//   POST /api/admin/word-images/verify      : admin — V144: kiểm tra THẬT trên R2 cho {hz:[...]} (≤50) + URL ký sẵn.
-//   Cron: /api/cron/generate-daily?task=images
-// Ảnh được sinh NỀN theo lô (không sinh lúc người học bấm) và không đụng FSRS / tiến độ học.
-// ════════════════════════════════════════════════════
-function wordImagesService() {
-  return wordImagesLib.getWordImages({
-    callText: callGemini,
-    env: () => aiConfigLib.imageEnv(aiRuntimeSync(), process.env), // V171: CF_* lấy từ cấu hình AI (DB > env); nền được làm "nóng" bởi middleware bên dưới
-    getWords: getAllVocabWords,
-    getParts: async () => {
-      const map = {};
-      for (const row of await getAllHanziParts()) {
-        const np = normalizeParts(row.parts);
-        if (!np) continue;
-        map[row.hz] = np.type === 'parts' ? np.items.map(x => `${x.c}(${x.m})`).join(' + ') : np.text;
-      }
-      return map;
-    },
-  });
-}
-
-app.get('/api/word-image', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  if (!checkRateLimit(req, 'word-image', { maxAttempts: 240, windowMs: 60 * 1000 })) {
-    return res.status(429).json({ ok: false, code: 'rate_limited', error: 'Bạn bấm quá nhanh, thử lại sau' });
-  }
-  try {
-    const out = await wordImagesService().resolve(String(req.query.hz || ''));
-    res.set('Cache-Control', 'private, no-store');
-    if (!out.ok) return res.status(400).json(out);
-    res.json(out);
-  } catch (e) { fail(res, e); }
-});
-
-app.post('/api/admin/word-images/generate', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  const actingUser = authed.db.users[authed.username];
-  if (!requireAdmin(actingUser, res)) return;
-  try {
-    const svc = wordImagesService();
-    const only = req.body && Array.isArray(req.body.hz) ? req.body.hz.slice(0, 50) : null;
-    const result = await svc.runBatch(50000, { only });
-    logActivity(authed.username, actingUser.role, 'vocab',
-      `Chạy sinh ảnh gợi nhớ: ${result.drafted} từ soạn prompt, ${result.generated} ảnh xong${result.failed ? `, ${result.failed} lỗi` : ''}${result.quota ? ' — hết hạn mức Cloudflare hôm nay' : ''}`);
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    console.error('⚠️  Lỗi:', e && e.message);
-    res.status(500).json({ ok: false, error: publicErrorMessage(e) });
-  }
-});
-
-app.get('/api/admin/word-images/status', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  if (!requireAdmin(authed.db.users[authed.username], res)) return;
-  try {
-    const svc = wordImagesService();
-    const counts = await svc.store.counts();
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, configured: svc.isConfigured(), missingEnv: svc.missingConfig(), counts });
-  } catch (e) { fail(res, e); }
-});
-
-// V144: thống kê ảnh gợi nhớ — CHỈ đọc database (nhanh, không gọi R2). Muốn biết ảnh có THẬT trên R2
-// hay không phải gọi /verify; giao diện luôn hiện rõ từ nào "chưa kiểm tra R2".
-app.get('/api/admin/word-images/audit', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  if (!requireAdmin(authed.db.users[authed.username], res)) return;
-  try {
-    const svc = wordImagesService();
-    const [words, rows] = await Promise.all([getAllVocabWords(), svc.store.auditRows()]);
-    const a = wordImageAudit.audit(words, rows);
-    res.set('Cache-Control', 'no-store');
-    res.json({
-      ok: true, configured: svc.isConfigured(), missingEnv: svc.missingConfig(),
-      generatedAt: new Date().toISOString(),
-      totals: a.totals, byLesson: a.byLesson, byTag: a.byTag,
-      words: wordImageAudit.packItems(a.items),
-    });
-  } catch (e) { fail(res, e); }
-});
-
-// V144: kiểm tra THẬT từng từ trên R2 (HEAD tệp + ký URL xem được). Gọi theo lô ≤50 từ để không quét
-// cả bucket một lượt — giao diện tự chia lô và hiện tiến độ. Không tạo/xoá gì cả (chỉ đọc).
-const WI_VERIFY_CONCURRENCY = 6;
-app.post('/api/admin/word-images/verify', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  if (!requireAdmin(authed.db.users[authed.username], res)) return;
-  if (!checkRateLimit(req, 'wi-verify', { maxAttempts: 240, windowMs: 60 * 1000 })) {
-    return res.status(429).json({ ok: false, code: 'rate_limited', error: 'Bạn bấm quá nhanh, thử lại sau' });
-  }
-  try {
-    const list = Array.from(new Set((req.body && Array.isArray(req.body.hz) ? req.body.hz : []).filter(wordImagesLib.isValidHz))).slice(0, 50);
-    if (!list.length) return res.status(400).json({ ok: false, error: 'Thiếu danh sách chữ Hán hợp lệ (hz), tối đa 50 từ mỗi lượt' });
-    const svc = wordImagesService();
-    const configured = svc.isConfigured();
-    const byHz = new Map((await svc.store.rowsFor(list)).map((r) => [r.hz, r]));
-    const results = [];
-    for (let i = 0; i < list.length; i += WI_VERIFY_CONCURRENCY) {
-      const part = await Promise.all(list.slice(i, i + WI_VERIFY_CONCURRENCY).map(async (hz) => {
-        const row = byHz.get(hz);
-        // Mức 1: chưa có bản ghi / bản ghi chưa 'ready' → không cần chạm R2.
-        if (!row || row.status !== 'ready' || !row.storage_key) {
-          return { hz, v: row ? 'notready' : 'norecord', status: row ? row.status : null, reason: row && row.error ? String(row.error).slice(0, 60) : '' };
-        }
-        if (!configured) return { hz, v: 'unknown', reason: 'R2 chưa cấu hình', size: row.file_size, ctype: row.content_type };
-        // Mức 2 + 3: tệp có thật trên R2 không, và có ký được URL để xem không.
-        try {
-          const head = await r2.headObject(row.storage_key);
-          if (!head) return { hz, v: 'gone', reason: 'Không thấy tệp trên R2 (storage_key có nhưng tệp đã mất)' };
-          const url = await r2.presignImageGet(row.storage_key, 1200);
-          const warn = (head.ContentLength && Number(row.file_size) && head.ContentLength !== Number(row.file_size))
-            ? 'Kích thước trên R2 khác bản ghi' : '';
-          return { hz, v: 'stored', url, size: head.ContentLength || row.file_size, ctype: head.ContentType || row.content_type, warn };
-        } catch (e) { return { hz, v: 'unknown', reason: wordImagesLib.safeCode(e) }; }
-      }));
-      results.push(...part);
-    }
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, configured, checkedAt: new Date().toISOString(), results });
-  } catch (e) { fail(res, e); }
-});
-
-app.post('/api/admin/word-images/reset', async (req, res) => {
-  const authed = await requireAuth(req, res);
-  if (!authed) return;
-  if (!requireAdmin(authed.db.users[authed.username], res)) return;
-  try {
-    const list = (req.body && Array.isArray(req.body.hz) ? req.body.hz : []).filter(wordImagesLib.isValidHz).slice(0, 100);
-    if (!list.length) return res.status(400).json({ ok: false, error: 'Thiếu danh sách chữ Hán hợp lệ (hz)' });
-    const removed = await wordImagesService().store.remove(list);
-    res.json({ ok: true, removed });
-  } catch (e) { fail(res, e); }
-});
-
 // V119.1 — "THƯ VIỆN AI": mọi giải thích AI người học đã xem được lưu theo tài khoản; xem lại KHÔNG gọi AI, KHÔNG tốn lượt.
 app.get('/api/ai/library', async (req, res) => {
   const authed = await requireAuth(req, res);
@@ -3892,14 +3743,10 @@ app.get('/api/cron/generate-daily', async (req, res) => {
     let hanvietResult = { batches: 0, done: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let hanziResult = { batches: 0, done: 0, errors: 0, totalPending: 0, errorSamples: [] };
     let wordResult = { batches: 0, wordsDone: 0, wordsRetried: 0, errors: 0, totalPending: 0, errorSamples: [] };
-    let imageResult = null;
     let convoResult = null;
     if (task === 'conversations') {
       // V153: sinh hội thoại bằng AI theo lịch — 1 bài/lượt gọi, tôn trọng hạn mức ngày (CONVERSATION_GEN_DAILY_LIMIT). Chỉ ra bản NHÁP, admin vẫn phải duyệt.
       convoResult = await runConversationGeneration({ count: 1, budgetMs: 250000, respectDailyLimit: true });
-    } else if (task === 'images') {
-      // V142: ảnh gợi nhớ — chạy riêng, không chặn/không bị chặn bởi Hán Việt, chiết tự, ví dụ
-      imageResult = await wordImagesService().runBatch(TOTAL_BUDGET_MS);
     } else if (task === 'examples') {
       wordResult = await runWordExampleGeneration(TOTAL_BUDGET_MS);
     } else {
@@ -3924,8 +3771,7 @@ app.get('/api/cron/generate-daily', async (req, res) => {
     logActivity(null, 'system', 'system',
       `[Tự động - cron] Hán Việt: ${hanvietResult.done} từ xong; Sinh ví dụ: ${wordResult.wordsDone} từ xong, ${wordResult.wordsRetried} cần thử lại; Chiết tự: ${hanziResult.done} chữ xong${errText}`);
     if (convoResult) logActivity(null, 'system', 'system', `[Tự động - cron] Hội thoại AI: ${convoResult.results.filter((x) => x.status === 'draft').length} bài nháp mới${convoResult.quota ? ' — hết hạn mức AI' : ''}${convoResult.limitReached ? ' — chạm hạn mức ngày' : ''}`);
-    if (imageResult) logActivity(null, 'system', 'system', `[Tự động - cron] Ảnh gợi nhớ: ${imageResult.drafted} từ soạn prompt, ${imageResult.generated} ảnh xong, ${imageResult.failed} lỗi${imageResult.quota ? ' (hết hạn mức Cloudflare)' : ''}`);
-    res.json({ ok: true, hanviet: hanvietResult, wordExamples: wordResult, hanziParts: hanziResult, wordImages: imageResult || undefined, conversations: convoResult || undefined });
+    res.json({ ok: true, hanviet: hanvietResult, wordExamples: wordResult, hanziParts: hanziResult, conversations: convoResult || undefined });
   } catch (e) {
     console.error('⚠️  Lỗi:', e && e.message);
     res.status(500).json({ ok: false, error: publicErrorMessage(e) });
