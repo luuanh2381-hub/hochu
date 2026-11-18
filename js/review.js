@@ -639,19 +639,30 @@ function rvExPy(e) {
 // V172: "Từ mới trong câu" — giải thích từ khác trong câu ví dụ (dữ liệu nhập từ file ở Quản trị). Chỉ hiện ở màn ĐÁP ÁN (không lộ đáp án),
 // bỏ từ đang học (đã có thẻ riêng). Mỗi từ 1 dòng: chữ Hán (pinyin) — nghĩa · ghi chú.
 function rvExWordsHtml(e) {
-  // V175: hiện TẤT CẢ từ database có cho câu này (không loại từ đang học), kèm PINYIN; chia 2 cột đều nhau.
+  // V175: màn đáp án LUÔN hiện đủ chữ Hán + pinyin + nghĩa cho MỌI từ database có cho câu (không phụ thuộc nút "Hiện Pinyin"); chia 2 cột đều.
   const ws = e && Array.isArray(e.words) ? e.words.filter(w => w && w.word) : [];
   if (!ws.length) return '';
-  const py = (typeof showPinyin === 'undefined' || showPinyin);
-  // Thiếu pinyin trong dữ liệu từ-trong-câu → lấy pinyin của đúng từ đó trong kho từ vựng (nếu có).
+  const dict = new Map();
+  const add = (hz, py, vi) => { if (!hz) return; const d = dict.get(hz) || {}; if (py && !d.py) d.py = String(py).trim(); if (vi && !d.vi) d.vi = vi; dict.set(hz, d); };
+  if (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) for (const x of WORDS) if (x) add(x.hz, x.py, x.vi);
+  if (typeof rvExamplePool !== 'undefined' && Array.isArray(rvExamplePool)) for (const ex of rvExamplePool) for (const w of ((ex && ex.words) || [])) if (w) add(w.word, w.py, w.vi);
+  // Thiếu pinyin trong dữ liệu → tra đúng từ trong kho; không có thì ghép từ các từ/chữ nhỏ hơn (khớp dài nhất trước). Thiếu chữ nào → '—'.
   const pyOf = (w) => {
     if (w.py) return w.py;
-    if (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) { const hit = WORDS.find(x => x && x.hz === w.word && x.py); if (hit) return hit.py; }
-    return '';
+    const d = dict.get(w.word); if (d && d.py) return d.py;
+    const parts = []; const t = w.word; let i = 0;
+    while (i < t.length) {
+      let hit = null;
+      for (let n = Math.min(t.length - i, 6); n >= 1 && !hit; n--) { const g = dict.get(t.slice(i, i + n)); if (g && g.py) hit = { n, py: g.py }; }
+      if (!hit) { if (/[\u3400-\u9fff]/.test(t[i])) return ''; i++; continue; }
+      parts.push(hit.py); i += hit.n;
+    }
+    return parts.join(' ');
   };
   const items = ws.map(w => {
-    const p = py ? pyOf(w) : '';
-    return `<div class="rv-words-i"><div class="rv-words-h"><b lang="zh">${escapeHtml(w.word)}</b>${p ? ` <span class="rv-words-py">${escapeHtml(p)}</span>` : ''}</div><div class="rv-words-m">${escapeHtml(w.vi || '')}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div></div>`;
+    const p = pyOf(w) || '—';
+    const vi = w.vi || (dict.get(w.word) || {}).vi || '—';
+    return `<div class="rv-words-i"><div class="rv-words-h"><b lang="zh">${escapeHtml(w.word)}</b> <span class="rv-words-py">${escapeHtml(p)}</span></div><div class="rv-words-m">${escapeHtml(vi)}${w.note ? ` <span class="rv-words-n">· ${escapeHtml(w.note)}</span>` : ''}</div></div>`;
   });
   return `<div class="rv-words"><div class="rv-words-t">📚 Từ mới trong câu (${ws.length})</div><div class="rv-words-g${items.length % 2 ? ' odd' : ''}">${items.join('')}</div></div>`;
 }
