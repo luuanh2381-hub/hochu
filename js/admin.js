@@ -10,6 +10,7 @@ function renderAdmin() {
     <div class="panel-title">📈 Lượt truy cập</div>
     <div id="visits-area" style="color:var(--muted);padding:14px 0;text-align:center;">Đang tải...</div>
   </div>
+  ${currentRole==='superadmin' ? aiCfgPanelHtml() : ''}
   <div class="panel">
     <div class="panel-title">🛠️ Quản trị tài khoản${currentRole==='superadmin' ? ' <span style="font-size:.7rem;background:var(--l15c);color:var(--l15a);padding:2px 8px;border-radius:8px;">QUẢN TRỊ CAO NHẤT</span>' : ''}</div>
     ${currentRole==='superadmin' ? adminRegPanelHtml() : ''}
@@ -1062,6 +1063,7 @@ async function clearAllVocab() {
 }
 async function bindAdmin() {
   if (!isAdminRole()) return;
+  if (currentRole === 'superadmin') aicLoad(); // V171: màn Cấu hình AI
   if (currentRole === 'superadmin') adminLoadReg(); // V119.3: trạng thái trang đăng ký (không chặn danh sách tài khoản)
   await adminLoadVisits();
   await adminLoadUsers();
