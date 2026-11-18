@@ -70,7 +70,8 @@ async function bindFlash(forceReload) {
   if (currentTab !== 'flash') return; // user đã rời tab trong lúc chờ tải
   if (error) {
     const content = document.getElementById('content');
-    if (content) content.innerHTML = `<div class="panel center" style="padding:40px">⚠️ ${error}</div>`;
+    if (content && typeof showLoadError === 'function') showLoadError(error, () => render(), { noHome: true }); // V175: nút Thử lại
+    else if (content) content.innerHTML = `<div class="panel center" style="padding:40px">⚠️ ${error}</div>`;
     return;
   }
   fcUpdate();

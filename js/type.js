@@ -49,7 +49,7 @@ async function _bindTypeAsync(forceReload) {
   if (isLoggedIn() && area) area.innerHTML = `<div class="panel center" style="padding:24px">⏳ Đang tải hàng đợi FSRS...</div>`;
   const { error } = await sqLoad(tyQueue, questionCount);
   if (currentTab !== 'type') return; // user đã rời tab trong lúc chờ tải
-  if (error) { if (area) area.innerHTML = `<div class="panel center" style="padding:24px">⚠️ ${error}</div>`; return; }
+  if (error) { if (area) { if (typeof showLoadError === 'function') showLoadError(error, () => bindType(true), { container: area, noHome: true }); else area.innerHTML = `<div class="panel center" style="padding:24px">⚠️ ${error}</div>`; } return; } // V175: nút Thử lại
   tyRenderQ();
 }
 function tyRenderQ() {

@@ -144,7 +144,7 @@ async function fetchTodayDashboard(force) {
     await flushProgressSync();
     const res = await fetch('/api/study/today', { headers: authHeaders() });
     const data = await res.json();
-    _todayDashCache = data; _todayDashCacheAt = Date.now();
+    if (data && data.ok) { _todayDashCache = data; _todayDashCacheAt = Date.now(); } // V175: không nhớ phản hồi LỖI (trước đây lỗi tạm thời bị giữ lại 10 giây)
     return data;
   } catch (e) {
     return { ok: false, error: e.message };
@@ -156,7 +156,7 @@ async function loadStudyDashboard() {
   try {
     const data = await fetchTodayDashboard(true);
     if (currentTab !== 'today') return; // user đã rời tab trong lúc chờ
-    if (!data.ok) { area.innerHTML = `<div class="study-empty">${data.error || 'Không tải được dữ liệu'}</div>`; return; }
+    if (!data.ok) { if (typeof showLoadError === 'function') showLoadError(data.error || 'Không tải được dữ liệu', loadStudyDashboard, { container: area, noHome: true }); else area.innerHTML = `<div class="study-empty">${data.error || 'Không tải được dữ liệu'}</div>`; return; } // V175: nút Thử lại
     if (!data.hasScope) {
       area.innerHTML = `<div class="study-empty">Chưa có từ vựng trong phạm vi Quyển/bài bạn đang chọn.<br>Vào <b>Trang chủ</b> để chọn Quyển/bài trước.</div>`;
       return;
@@ -164,7 +164,7 @@ async function loadStudyDashboard() {
     // V110: KHÔNG thoát sớm khi hết thẻ/từ mới — người học vẫn cần thấy thống kê và các chế độ luyện bổ sung / kiểm tra lại.
     area.innerHTML = renderTodayPanel(data);
   } catch (e) {
-    area.innerHTML = `<div class="study-empty">Lỗi kết nối: ${e.message}</div>`;
+    if (typeof showLoadError === 'function') showLoadError(e.message, loadStudyDashboard, { container: area, noHome: true }); else area.innerHTML = `<div class="study-empty">Lỗi kết nối: ${e.message}</div>`; // V175: nút Thử lại
   }
 }
 

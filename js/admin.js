@@ -336,8 +336,9 @@ async function triggerHanVietGeneration() {
 }
 // ── V156: quản lý câu ví dụ bằng file ──
 function wexEsc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-function downloadExampleTemplate() {
+async function downloadExampleTemplate() {
   // V170: mẫu DẠNG RỘNG — 1 dòng / 1 từ, tối đa 3 cặp (zh1/py1/vi1 … zh3/py3/vi3)
+  try { await ensureXlsx(); } catch (e) { alert(e.message); return; } // V175: thư viện Excel tải theo nhu cầu
   const ws = XLSX.utils.json_to_sheet(EXF.TEMPLATE_ROWS);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ví dụ');
@@ -349,6 +350,7 @@ async function readExampleFile() {
   const input = document.getElementById('wex-file-input');
   const file = input && input.files && input.files[0];
   if (!file) throw new Error('Chưa chọn file.');
+  await ensureXlsx(); // V175
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
@@ -913,7 +915,8 @@ function normalizeVocabTag(raw) {
   }
   return s; // giữ nguyên các loại tag khác trong tương lai, không chỉ riêng ly hợp
 }
-function downloadVocabTemplate() {
+async function downloadVocabTemplate() {
+  try { await ensureXlsx(); } catch (e) { alert(e.message); return; } // V175: thư viện Excel tải theo nhu cầu
   const ws = XLSX.utils.json_to_sheet([
     { hz: '你好', py: 'nǐ hǎo', vi: 'xin chào', l: 1, tag: '' },
     { hz: '谢谢', py: 'xièxie', vi: 'cảm ơn', l: 1, tag: '' },
@@ -930,6 +933,7 @@ async function uploadVocabExcel() {
   if (!file) { resultEl.textContent = 'Chưa chọn file.'; return; }
   resultEl.textContent = 'Đang đọc file...';
   try {
+    await ensureXlsx(); // V175
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
     const sheet = wb.Sheets[wb.SheetNames[0]];

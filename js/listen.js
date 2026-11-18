@@ -51,7 +51,7 @@ async function _bindListenAsync(forceReload) {
   if (isLoggedIn() && area) area.innerHTML = `<div class="panel center" style="padding:24px">⏳ Đang tải hàng đợi FSRS...</div>`;
   const { error } = await sqLoad(lsQueue, questionCount);
   if (currentTab !== 'listen') return; // user đã rời tab trong lúc chờ tải
-  if (error) { if (area) area.innerHTML = `<div class="panel center" style="padding:24px">⚠️ ${error}</div>`; return; }
+  if (error) { if (area) { if (typeof showLoadError === 'function') showLoadError(error, () => bindListen(true), { container: area, noHome: true }); else area.innerHTML = `<div class="panel center" style="padding:24px">⚠️ ${error}</div>`; } return; } // V175: nút Thử lại
   lsRenderQ();
 }
 

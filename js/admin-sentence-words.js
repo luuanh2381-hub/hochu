@@ -22,13 +22,17 @@ function sentwPanelHtml() {
     </div>
     <div id="sentw-result" style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;overflow-wrap:anywhere;"></div>`;
 }
-function sentwSaveWorkbook(rows, filename, withPrompt) {
+async function sentwSaveWorkbook(rows, filename, withPrompt) {
+  await ensureXlsx(); // V175: thư viện Excel tải theo nhu cầu (lỗi tải → ném lỗi cho nơi gọi hiện thông báo)
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Câu');
   if (withPrompt) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Lời nhắc dán vào công cụ AI (kèm file ở sheet "Câu")']].concat(SWX.PROMPT_TEXT.split('\n').map((l) => [l]))), 'Hướng dẫn');
   XLSX.writeFile(wb, filename);
 }
-function sentwTemplate() { sentwSaveWorkbook(SWX.TEMPLATE_ROWS, 'mau-tu-moi-trong-cau.xlsx', true); }
+async function sentwTemplate() {
+  try { await sentwSaveWorkbook(SWX.TEMPLATE_ROWS, 'mau-tu-moi-trong-cau.xlsx', true); }
+  catch (e) { const el = document.getElementById('sentw-result'); if (el) el.textContent = '❌ ' + e.message; }
+}
 async function sentwExport(scope) {
   const el = document.getElementById('sentw-result'); el.textContent = 'Đang lấy danh sách câu...';
   try {
@@ -36,7 +40,7 @@ async function sentwExport(scope) {
     const d = await res.json();
     if (!d.ok) { el.textContent = '❌ ' + (d.error || 'Có lỗi xảy ra'); return; }
     if (!d.rows.length) { el.textContent = scope === 'missing' ? `✅ Tất cả ${d.total} câu đã có giải thích từ — không còn câu nào cần xuất.` : 'Chưa có câu ví dụ nào.'; return; }
-    sentwSaveWorkbook(d.rows, scope === 'missing' ? 'cau-can-giai-thich-tu.xlsx' : 'tat-ca-cau-giai-thich-tu.xlsx', true);
+    await sentwSaveWorkbook(d.rows, scope === 'missing' ? 'cau-can-giai-thich-tu.xlsx' : 'tat-ca-cau-giai-thich-tu.xlsx', true);
     el.innerHTML = `✅ Đã xuất <b>${d.rows.length}</b> câu (tổng ${d.total} câu, đã có giải thích ${d.done}). Sheet “Hướng dẫn” có lời nhắc để dán vào công cụ AI.${d.rows.length >= 5000 ? ' ⚠️ Đã chạm giới hạn 5000 câu/lần — xuất lại sau khi nhập để lấy phần còn lại.' : ''}`;
   } catch (e) { el.textContent = '❌ ' + e.message; }
 }
@@ -45,6 +49,7 @@ async function sentwImport(dryRun) {
   try {
     const input = document.getElementById('sentw-file-input'); const file = input && input.files && input.files[0];
     if (!file) throw new Error('Chưa chọn file.');
+    await ensureXlsx(); // V175
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
     const sheet = wb.Sheets['Câu'] || wb.Sheets[wb.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });

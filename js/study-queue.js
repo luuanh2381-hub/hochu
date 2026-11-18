@@ -33,7 +33,7 @@ async function loadFsrsPracticePool(limit) {
     const newHz = new Set((data.session || []).filter(it => it.type === 'new').map(it => it.word.hz));
     return { words, newHz, blockedByBacklog: !!data.blockedByBacklog, totalDue: data.totalDue || 0 };
   } catch (e) {
-    return { words: [], error: e.message };
+    return { words: [], error: (typeof friendlyNetError === 'function' ? friendlyNetError(e) : e.message) }; // V175: thông báo tiếng Việt dễ hiểu (fetch đã tự thử lại trước khi tới đây)
   }
 }
 

@@ -730,6 +730,7 @@ function convoFileResult(html) { const el = document.getElementById('convo-file-
 async function convoDownloadTemplate() {
   const r = await convoRequest('GET', '/admin/conversations/import-template');
   if (!r.ok) { convoFileResult('⚠️ ' + escapeHtml(r.error || 'Không tải được file mẫu')); return; }
+  try { await ensureXlsx(); } catch (e) { convoFileResult('⚠️ ' + escapeHtml(e.message)); return; } // V175
   const ws = XLSX.utils.json_to_sheet(r.rows, { header: r.columns });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Hội thoại');
@@ -740,6 +741,7 @@ async function convoReadFile() {
   const input = document.getElementById('convo-file-input');
   const file = input && input.files && input.files[0];
   if (!file) throw new Error('Chưa chọn file.');
+  await ensureXlsx(); // V175
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array' });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });

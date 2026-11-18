@@ -68,19 +68,22 @@ async function ensureVocabLoaded(bookIds) {
   try {
     const res = await fetch(url, { headers: authHeaders() });
     const data = await res.json();
-    if (data.ok && Array.isArray(data.vocab)) {
-      const seen = new Set(WORDS.map(w => w.hz + '-' + w.l));
-      for (const w of data.vocab) {
-        const key = w.hz + '-' + w.l;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        WORDS.push(w);
-      }
-      _bookCountCache.len = -1; // WORDS vừa đổi -> tính lại cache số từ theo Quyển
+    // V175 (lỗi gốc của "tải lỗi data, phải tải lại trang"): trước đây khi server trả lỗi (ok:false — DB vừa thức dậy, phiên hết hạn...)
+    // đoạn dưới vẫn đánh dấu các bài là "đã tải" dù KHÔNG có từ nào → từ vựng thiếu mãi tới khi F5. Nay chỉ đánh dấu khi tải THẬT sự thành công.
+    if (!(data.ok && Array.isArray(data.vocab))) throw new Error(data.error || 'Máy chủ chưa trả đủ từ vựng');
+    const seen = new Set(WORDS.map(w => w.hz + '-' + w.l));
+    for (const w of data.vocab) {
+      const key = w.hz + '-' + w.l;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      WORDS.push(w);
     }
+    _bookCountCache.len = -1; // WORDS vừa đổi -> tính lại cache số từ theo Quyển
     needed.forEach(l => loadedLessonNumbers.add(l));
-  } catch {
-    // Không tải được thì các bài đó tạm hiện thiếu từ, không chặn app — sẽ thử lại khi chọn lại
+    if (typeof hideLoadBanner === 'function') hideLoadBanner('vocab');
+  } catch (e) {
+    // Không tải được thì các bài đó tạm hiện thiếu từ, không chặn app. V175: hiện thanh báo có nút "Thử lại" (trước đây im lặng).
+    if (typeof showLoadBanner === 'function') showLoadBanner('Chưa tải được từ vựng. ' + (typeof friendlyNetError === 'function' ? friendlyNetError(e) : e.message), async () => { await ensureVocabLoaded(bookIds); render(); }, 'vocab');
   }
 }
 

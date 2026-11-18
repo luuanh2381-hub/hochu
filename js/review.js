@@ -413,6 +413,11 @@ function rvLoadExamples(items, waitMs) {
 // V77/V78: gọi API lấy 1 bộ từ MỚI (due/new thật từ server, hoặc weak-words) — dùng chung cho cả
 // nhánh "tải phiên mới" của startStudySession() lẫn rvRelearnFromStart(), tránh 2 nơi tự viết lại
 // cùng 1 logic rồi lệch nhau theo thời gian.
+// V175: tải phiên học lỗi (sau khi đã tự thử lại) → hiện khung "Thử lại" thay vì alert rồi đá người học về trang khác.
+function rvLoadFailed(error, retry) {
+  if (typeof showLoadError === 'function' && showLoadError(error, retry)) return;
+  alert(error); goTab('today');
+}
 async function rvFetchFreshSession(ignoreDayDedupe) {
   try {
     if (rvWeakMode) {
@@ -438,7 +443,7 @@ async function rvFetchFreshSession(ignoreDayDedupe) {
       learner: (data.learner && data.learner.v === 1 && data.learner.skills) ? data.learner : null, // V127
     };
   } catch (e) {
-    return { error: e.message };
+    return { error: (typeof friendlyNetError === 'function' ? friendlyNetError(e) : e.message) };
   }
 }
 
@@ -529,7 +534,7 @@ async function startStudySession(weakMode, forceNew) {
   const fetched = await rvFetchFreshSession(false);
   const { error, blockedByBacklog, totalDue, scopeLessons } = fetched;
   let { list, reviewCount, newCount } = fetched;
-  if (error) { alert(error); goTab('today'); return; }
+  if (error) { rvLoadFailed(error, () => { rvOnlyType = onlyType; startStudySession(weakMode, false); }); return; } // V175: nút Thử lại (phiên cũ đã được lưu/lưu trữ trước đó nên không cần forceNew)
   rvLearner = fetched.learner || null; // V127
   if (onlyType && !rvWeakMode) { // V110: chế độ thu hẹp
     list = list.filter(it => it.type === (onlyType === 'due' ? 'review' : 'new'));
@@ -610,7 +615,7 @@ async function rvRelearnFromStart() {
   const el = document.getElementById('content');
   if (el) el.innerHTML = `<div class="study-empty">Đang tải phiên học...</div>`;
   const { list, error, reviewCount, newCount, blockedByBacklog, totalDue, learner } = await rvFetchFreshSession(true);
-  if (error) { alert(error); goTab('today'); return; }
+  if (error) { rvLoadFailed(error, () => rvRelearnFromStart()); return; } // V175: nút Thử lại
   rvLearner = learner || null; // V127
   rvCapOffSkipped = 0; // V149: "Học lại từ đầu" không áp trần số thẻ
   rvQueue.items = list;
