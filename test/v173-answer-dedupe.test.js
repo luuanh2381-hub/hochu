@@ -18,11 +18,17 @@ function env(over) {
 }
 let passed = 0, failed = 0; const test = (n, f) => { try { f(); passed++; console.log('  ✅ ' + n); } catch (e) { failed++; console.log('  ❌ ' + n + '\n     ' + (e && e.message)); } };
 
-test('khối câu có: câu Hán, pinyin cả câu, nghĩa cả câu và "Từ mới trong câu" NGAY DƯỚI câu (từ đang học 打印 bị bỏ)', () => {
+test('khối câu có: câu Hán, pinyin cả câu, nghĩa cả câu và "Từ mới trong câu" NGAY DƯỚI câu (V175: hiện TẤT CẢ từ, kể cả từ đang học)', () => {
   const h = env().block();
   assert.ok(h.includes('下午经理') && h.includes('Xiàwǔ') && h.includes(VI));
   assert.ok(h.indexOf('rv-sent-vi') < h.indexOf('rv-words') && h.includes('Từ mới trong câu') && h.includes('经理') && h.includes('不得不'));
-  assert.ok(!h.includes('<b lang="zh">打印</b>'), 'từ đang học không lặp trong danh sách từ mới');
+  assert.ok(h.includes('<b lang="zh">打印</b>'), 'V175: hiện đủ mọi từ database có cho câu');
+  assert.ok(h.includes('jīnglǐ'), 'V175: có pinyin của từ');
+});
+test('V175: lưới 2 cột; số từ lẻ → từ cuối trải ngang để 2 bên cân đối; thiếu pinyin → lấy từ kho từ vựng WORDS', () => {
+  const h = env({ WORDS: [{ hz: '不得不', py: 'bùdébù' }] }).block();
+  assert.ok(h.includes('rv-words-g odd') && h.includes('(3)') && h.includes('bùdébù'));
+  assert.ok(rv.includes('grid-template-columns:1fr 1fr'));
 });
 test('pinyin cả câu vẫn hiện ở màn kết quả dù đang tắt "Hiện Pinyin" (như dòng "Pinyin cả câu" cũ)', () => { assert.ok(env({ showPinyin: false }).block().includes('Xiàwǔ')); });
 test('khung giải thích KHÔNG còn lặp câu đầy đủ / nghĩa cả câu / pinyin cả câu / dòng tóm tắt từ → rỗng', () => { assert.strictEqual(env().explain(), ''); });
