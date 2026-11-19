@@ -1,5 +1,8 @@
 {
   "framework": null,
+  "regions": [
+    "syd1"
+  ],
   "installCommand": "rm -rf node_modules && ( [ -f package-lock.json ] && npm ci || npm install )",
   "rewrites": [
     {

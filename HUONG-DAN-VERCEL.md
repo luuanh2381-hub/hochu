@@ -89,3 +89,21 @@ cũng không vượt quota Gemini vì hàng đợi quota nằm chung trong Postg
   DATABASE_URL="chuỗi-kết-nối-của-bạn" GEMINI_API_KEY="key-của-bạn" npm start
   ```
   rồi mở `http://localhost:3000`.
+
+---
+
+## V177 — Tăng tốc tải dữ liệu từ Neon (không đổi cách ghi kết quả học)
+
+**Đã làm sẵn trong code (có hiệu lực sau lần deploy kế tiếp):**
+- `vercel.json` đặt `"regions": ["syd1"]` → server chạy ở Sydney, cùng vùng với Neon (AWS Asia Pacific 2 – Sydney). Trước đó Vercel dùng vùng mặc định (Washington D.C.), mỗi truy vấn đi nửa vòng trái đất.
+  Sau khi deploy, vào Vercel → Deployment → mục Functions/Resources để thấy vùng; hoặc xem Logs có dòng `[db] Neon ap-southeast-2 · ... · server Vercel syd1`.
+- Server thức dậy không còn chạy lại hàng chục lệnh "kiểm tra/tạo bảng": lần deploy đầu tiên sau V177 chạy đủ **một lần** (hơi chậm lần mở đầu), từ đó mỗi lần thức dậy chỉ cần 1 lệnh.
+  - Cần chạy lại toàn bộ (ví dụ sau khi tự tay xoá bảng trong Neon): thêm biến môi trường `SCHEMA_FORCE_INIT` = `1` trong Vercel rồi Redeploy (xong việc nhớ xoá biến này), hoặc chạy `DELETE FROM schema_state;` trong Neon SQL Editor.
+
+**Việc BẠN cần làm: dùng địa chỉ kết nối "pooler" của Neon** (ổn định hơn khi nhiều server thức dậy cùng lúc)
+1. Neon Console → chọn dự án → nút **Connect** (thông tin kết nối) → bật **Connection pooling** (tên có thể khác đôi chút tuỳ giao diện).
+2. Sao chép chuỗi kết nối mới — tên máy chủ trong đó có chữ `-pooler` (ví dụ `ep-xxxx-pooler.ap-southeast-2.aws.neon.tech`). **Chép chuỗi cũ ra chỗ khác trước** để quay lại khi cần.
+3. Vercel → Project → Settings → Environment Variables → sửa biến **DATABASE_URL** (Production, và Preview nếu có dùng) → dán chuỗi mới → Save.
+4. **Redeploy** (Deployments → ⋯ → Redeploy) để biến mới có hiệu lực.
+5. Kiểm tra: Vercel → Logs, tìm dòng `[db] Neon ap-southeast-2 · kết nối POOLER (tốt) · server Vercel syd1`. Nếu thấy "TRỰC TIẾP" nghĩa là chưa đổi được địa chỉ; "KHÁC VÙNG" nghĩa là vùng Vercel chưa khớp Neon.
+Không thấy chuyển biến tốt hoặc gặp lỗi lạ → dán lại chuỗi cũ và Redeploy (an toàn, không mất dữ liệu).
