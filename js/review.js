@@ -993,6 +993,17 @@ function rvInjectStyle() {
   .rv-words-g.odd .rv-words-i:last-child{grid-column:1 / -1}
   .rv-words-i{color:var(--ink,inherit);background:var(--card-alt,rgba(127,127,127,.08));border-radius:8px;padding:6px 8px;min-width:0;overflow-wrap:anywhere}
   .rv-words-h b{font-size:1rem}.rv-words-py{color:var(--muted);font-size:.8rem}.rv-words-m{font-size:.82rem}.rv-words-n{color:var(--muted);font-size:.8rem}
+  .rv-hskc{margin-top:8px;padding-top:6px;border-top:1px dashed var(--border);text-align:left;font-size:.85rem;line-height:1.5}
+  .rv-hskc-t{font-weight:800;font-size:.78rem;color:var(--muted);margin-bottom:4px}
+  .rv-hskc-pending .rv-hskc-t{font-weight:600;margin:0}
+  .rv-hskc-g{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .rv-hskc-g.odd .rv-hskc-i:last-child{grid-column:1 / -1}
+  .rv-hskc-i{background:var(--card-alt,rgba(127,127,127,.08));border-radius:8px;padding:6px 8px;min-width:0;overflow-wrap:anywhere}
+  .rv-hskc-h b{font-size:1.25rem}.rv-hskc-note{color:var(--muted);font-size:.72rem}
+  .rv-hskc-w{margin-top:3px;font-size:.82rem}.rv-hskc-w b{font-size:.95rem}
+  .rv-hskc-hl{color:var(--accent,#c0392b);text-decoration:underline}
+  .rv-hskc-lv{display:inline-block;font-size:.65rem;font-weight:800;padding:0 5px;border-radius:6px;background:rgba(127,127,127,.18);color:var(--muted);vertical-align:middle}
+  .rv-hskc-py{color:var(--muted);font-size:.78rem}.rv-hskc-more,.rv-hskc-none{color:var(--muted);font-size:.75rem;margin-top:2px}
   .rv-mode-wrap{margin:10px 0}
   .rv-mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
   .rv-mode{display:flex;flex-direction:column;gap:3px;text-align:left;background:var(--paper);color:var(--ink,inherit);border:1.5px solid var(--border);border-radius:12px;padding:9px 11px;cursor:pointer;min-height:44px;font:inherit}
@@ -1341,6 +1352,7 @@ function rvSummaryHtml() {
 
 function renderReview() {
   rvInjectStyle();
+  if (typeof hskcLoad === 'function') hskcLoad(); // V176: tải sẵn danh sách HSK 1-4 (1 lần) để màn đáp án có ngay "Từng chữ trong HSK"
   if (rvStage === 'start' && rvStartInfo) return rvStartHtml();
   if (!rvQueue.items.length) {
     // FIX (audit — màn "Xong phiên học! Đã ôn 0 từ, học 0 từ mới" gây hiểu lầm là lỗi): tách riêng
@@ -1391,6 +1403,7 @@ function renderReview() {
       ${showMeaning ? `<div class="rv-vi">${escapeHtml(w.vi || '')}</div>` : ''}
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>` : ''}
       ${renderHanziParts(w.hz, false, true)}
+      ${typeof hskcHtml === 'function' ? hskcHtml(w.hz) : ''}
       ${rvExplainHtml()}
       ${rvAiHtml(w, r)}
       ${(exD && !(rvQuestion && (rvQuestion.typeId === 'cloze' || (rvQuestion.sentence && rvQuestion.sentence.zh)))) ? `<div class="rv-ex">${escapeHtml(exD.zh)}${rvExPy(exD)}<br><span style="color:var(--muted);font-size:.85rem;">${escapeHtml(exD.vi || '')}</span>${rvExWordsHtml(exD)}</div>` : ''}
@@ -1417,6 +1430,7 @@ function renderReview() {
       ${showMeaning ? `<div class="rv-vi">${w.vi || ''}</div>` : ''}
       ${(w.hanviet && rvShowHV()) ? `<div class="rv-hv">Hán Việt: ${w.hanviet}</div>` : ''}
       ${renderHanziParts(w.hz, false, true)}
+      ${typeof hskcHtml === 'function' ? hskcHtml(w.hz) : ''}
       ${rvExplainHtml()}
       ${r && !r.correct ? rvCorrectionHtml(w, r) : ''}
       ${rvAiHtml(w, r)}
