@@ -78,6 +78,7 @@ function makeFakeDb() {
     for (const re of failOn) if (re.test(s)) throw new Error('sự cố giả lập: ' + re);
     if (/^(BEGIN|COMMIT|ROLLBACK)/.test(s)) return { rows: [] };
     if (verb === 'ALTER' || verb === 'CREATE' || verb === 'DROP') return { rows: [] }; // DDL (ensureSkillTables) — thống kê riêng bên dưới
+    if (/^INSERT INTO schema_state\b/i.test(s)) return { rows: [] }; // V177: ghi dấu vân tay lược đồ (sổ sách của lệnh tạo bảng, như DDL) — KHÔNG phải dữ liệu học, không tính vi phạm
     if (verb === 'INSERT' || verb === 'UPDATE' || verb === 'DELETE' || verb === 'TRUNCATE') {
       const target = (s.match(/^(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE(?: TABLE)?)\s+([a-z_]+)/i) || [])[1];
       if (!ALLOWED_WRITE.has(target)) {
@@ -144,7 +145,7 @@ function loadReal(fake) {
   return { store: require(path.join(ROOT, 'lib/skill-store.js')), service: require(path.join(ROOT, 'lib/fsrs/reviewService.js')) };
 }
 const practice = (over) => ({ userId: 'u1', hz: '提高', exerciseType: 'practice-recall-typed', answerCorrect: true, selectedAnswer: '提高', responseTimeMs: 1500, attemptKey: 'k-' + Math.random().toString(36).slice(2, 12), sessionId: 'sess-audit-1', source: 'extra', ...over });
-const writesByTable = (stmts) => { const o = {}; for (const s of stmts) if (['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'].includes(s.verb)) { const t = (s.sql.match(/^(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE(?: TABLE)?)\s+([a-z_]+)/i) || [])[1]; o[t] = (o[t] || 0) + 1; } return o; };
+const writesByTable = (stmts) => { const o = {}; for (const s of stmts) if (['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'].includes(s.verb)) { const t = (s.sql.match(/^(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE(?: TABLE)?)\s+([a-z_]+)/i) || [])[1]; if (t !== 'schema_state') o[t] = (o[t] || 0) + 1; /* V177: bỏ qua sổ sách lược đồ */ } return o; };
 
 (async () => {
   // ═════════════ [A1] ĐỐI CHỨNG DƯƠNG: bộ phát hiện phải bắt được một lượt ôn FSRS chính thức ═════════════
