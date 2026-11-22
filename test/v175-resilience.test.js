@@ -112,7 +112,7 @@ test('index.html: resilience.js nạp ĐẦU TIÊN; không còn thẻ tải thư
   assert.strictEqual(srcs[0], '/js/resilience.js'); assert.ok(!/xlsx/i.test(h), 'không còn xlsx trong index.html');
 });
 test('mọi hàm dùng XLSX đều gọi ensureXlsx() TRƯỚC khi dùng', () => {
-  const spec = { 'js/admin.js': ['downloadExampleTemplate', 'readExampleFile', 'downloadVocabTemplate', 'uploadVocabExcel'], 'js/conversation.js': ['convoDownloadTemplate', 'convoReadFile'], 'js/admin-sentence-words.js': ['sentwSaveWorkbook', 'sentwImport'] };
+  const spec = { 'js/admin.js': ['downloadExampleTemplate', 'readBundleFile', 'downloadVocabTemplate', 'uploadVocabExcel'], 'js/conversation.js': ['convoDownloadTemplate', 'convoReadFile'], 'js/admin-sentence-words.js': ['sentwSaveWorkbook'] };
   for (const [f, fns] of Object.entries(spec)) { const s = read(f); for (const fn of fns) { const body = grab(s, fn); assert.ok(body.indexOf('ensureXlsx') >= 0 && body.indexOf('ensureXlsx') < body.indexOf('XLSX.'), f + ':' + fn); } }
   assert.ok(/await sentwSaveWorkbook\(d\.rows/.test(read('js/admin-sentence-words.js')), 'sentwExport phải chờ lưu xong rồi mới báo ✅');
 });

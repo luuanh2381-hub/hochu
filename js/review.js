@@ -475,6 +475,60 @@ function startStudyMode(kind) {
   rvOnlyType = (kind === 'due' || kind === 'new') ? kind : null;
   ssEnterMode('review');
 }
+// ── V179 (audit "Học tiếp" phiên bỏ dở): 3 sửa lỗi ──────────────────────────────────────────────────────────────────────
+// (1) Khôi phục phiên THẬT sau một buổi luyện tập độc lập từng để lại cờ practiceOnly=true → không còn lưu tiến trình, không dọn phiên khi xong.
+//     Nay khôi phục luôn dựng hàng đợi MỚI (sqCreate) rồi mới gán dữ liệu đã lưu.
+// (2) Thẻ vừa chấm & ghi lên Neon nhưng chưa "sang câu kế" lúc thoát: bản lưu vẫn còn thẻ đó ở đầu hàng → mở lại bị hỏi và chấm FSRS lần 2.
+//     Nay ghi dấu `graded` vào bản lưu NGAY khi gửi kết quả (chỉ ghi localStorage, KHÔNG đổi đường ghi lên server); khôi phục coi thẻ đó là đã xong.
+// (3) Bản lưu chỉ nằm trên máy: thẻ đã ôn ở máy/tab khác (hoặc do hàng chờ gửi muộn) vẫn hiện lại. Nay khi khôi phục hỏi server (1 lệnh ĐỌC,
+//     tối đa RV_REVALIDATE_MAX_WAIT_MS; lỗi/quá thời gian → bỏ qua, vẫn mở phiên) thẻ nào đã được ôn kể từ lúc phiên bắt đầu và bỏ chúng khỏi hàng đợi.
+const RV_REVALIDATE_MAX_WAIT_MS = 1500;
+const RV_REVALIDATE_SKEW_MS = 60000; // lệch đồng hồ máy ↔ server: lùi mốc 60 giây cho an toàn (chỉ có thể làm bỏ NHẦM 1 thẻ, không bao giờ hỏi trùng)
+
+function rvIsOfficialItem(it) { return !!it && !!it.word && (it.type === 'review' || it.type === 'new'); }
+
+// Ghi dấu thẻ đầu hàng đã được chấm (gọi ngay sau khi gửi kết quả và lại khi server xác nhận). Không đổi hàng đợi trong bộ nhớ.
+function rvMarkGraded(item, correct) {
+  if (rvQueue.practiceOnly || !rvIsOfficialItem(item) || rvQueue.items[0] !== item) return; // đã sang câu kế → rvAdvanceQueue đã lưu bản mới
+  rvQueue.graded = { hz: item.word.hz, l: item.word.l, type: item.type, correct: correct == null ? null : !!correct, at: Date.now(), sid: rvQueue.sessionId };
+  sqPersist(rvStorageMode(), rvQueue, { summary: rvSummary, log: rvLog, learner: rvLearner });
+}
+
+// Áp dấu `graded` của bản lưu: nếu thẻ đầu hàng CHÍNH LÀ thẻ đã chấm thì coi như đã sang câu kế (không hỏi lại, không chấm lần 2).
+function rvApplyGradedMarker(saved) {
+  let items = saved.items;
+  let answeredCount = saved.answeredCount || 0;
+  const completedCards = Array.isArray(saved.completedCards) ? saved.completedCards.slice() : [];
+  let knownHz = null;
+  const g = saved.graded;
+  const it0 = items[0];
+  if (g && rvIsOfficialItem(it0) && it0.word.hz === g.hz && it0.type === g.type && (!g.sid || g.sid === saved.sessionId)) {
+    items = items.slice(1);
+    answeredCount += 1;
+    completedCards.push({ hz: g.hz, l: g.l, correct: g.correct === true, at: g.at || Date.now() });
+    if (g.correct === true) knownHz = g.hz;
+  }
+  return { items, answeredCount, completedCards, knownHz };
+}
+
+// Hỏi server thẻ nào (theo hz) đã được ôn chính thức kể từ lúc phiên bắt đầu. KHÔNG BAO GIỜ ném lỗi: lỗi/quá thời gian → tập rỗng (mở phiên như cũ).
+async function rvFetchReviewedElsewhere(items, startMs) {
+  let timer;
+  try {
+    if (!authToken) return new Set();
+    const hzs = [...new Set(items.filter(rvIsOfficialItem).map(it => it.word.hz))].slice(0, 200);
+    if (!hzs.length) return new Set();
+    const since = Math.max(0, (startMs || Date.now()) - RV_REVALIDATE_SKEW_MS);
+    const cards = hzs.map(h => encodeURIComponent(h)).join(',');
+    const res = await Promise.race([
+      fetch('/api/study/session/reviewed-since?since=' + since + '&cards=' + encodeURIComponent(cards), { headers: authHeaders(), noRetry: true }),
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timeout')), RV_REVALIDATE_MAX_WAIT_MS); }),
+    ]);
+    const d = await res.json();
+    return (d && d.ok && Array.isArray(d.reviewed)) ? new Set(d.reviewed) : new Set();
+  } catch { return new Set(); } finally { if (timer) clearTimeout(timer); }
+}
+
 async function startStudySession(weakMode, forceNew) {
   if (!rvLeechOnly) rvLeechMode = false; // vào bằng cách khác (không qua startLeechSession) → thoát chế độ cứng đầu
   const onlyType = rvOnlyType; rvOnlyType = null;
@@ -490,16 +544,24 @@ async function startStudySession(weakMode, forceNew) {
     // bỏ và nạp phiên mới từ server.
     if (saved && rvSavedSessionIsHollow(saved)) { sqClearPersisted(savedKey); saved = null; }
     if (saved && saved.items.length && sqLessonFilterMatches(saved.lessonFilter)) {
-      const filteredItems = saved.items.filter(it => (it.type !== 'review' && it.type !== 'new') || !sessionKnownHz.has(it.word.hz)); // V106: chỉ lọc thẻ FSRS đã biết; giữ câu luyện bổ sung
-      const purged = saved.items.length - filteredItems.length;
+      const applied = rvApplyGradedMarker(saved); // V179 (2): thẻ đã chấm & ghi lên server trước khi thoát → coi như đã xong
+      const candidates = applied.items.filter(it => (it.type !== 'review' && it.type !== 'new') || !sessionKnownHz.has(it.word.hz)); // V106: chỉ lọc thẻ FSRS đã biết; giữ câu luyện bổ sung
+      // V179 (3): bỏ thẻ chính thức đã được ôn ở máy/tab khác kể từ khi phiên bắt đầu (hỏi server; lỗi/quá thời gian → bỏ qua)
+      if (candidates.some(rvIsOfficialItem)) { const el0 = document.getElementById('content'); if (el0) el0.innerHTML = `<div class="study-empty">Đang khôi phục phiên học...</div>`; }
+      const reviewedHz = await rvFetchReviewedElsewhere(candidates, saved.startTime || saved.savedAt);
+      const filteredItems = reviewedHz.size ? candidates.filter(it => !(rvIsOfficialItem(it) && reviewedHz.has(it.word.hz))) : candidates;
+      const purged = applied.items.length - filteredItems.length;
       if (filteredItems.length) {
+        if (applied.knownHz) { sessionKnownHz.add(applied.knownHz); saveSessionKnownHz(); sqPurgeHzFromAllQueues(applied.knownHz); } // như rvAdvanceQueue khi trả lời đúng
+        rvQueue = sqCreate(); // V179 (1): hàng đợi MỚI — không thừa hưởng cờ practiceOnly/trạng thái của buổi luyện tập độc lập trước đó
         rvQueue.items = filteredItems;
         rvQueue.sessionId = saved.sessionId;
         rvQueue.totalPlanned = saved.totalPlanned;
-        rvQueue.answeredCount = saved.answeredCount + purged;
+        rvQueue.answeredCount = applied.answeredCount + purged;
         rvQueue.startTime = saved.startTime || Date.now();
         rvQueue.endTime = null;
-        rvQueue.completedCards = Array.isArray(saved.completedCards) ? saved.completedCards : [];
+        rvQueue.doneHz = new Set(Array.isArray(saved.doneHz) ? saved.doneHz : []);
+        rvQueue.completedCards = applied.completedCards;
         rvQueue.lessonFilter = saved.lessonFilter || sqSnapshotLessonFilter();
         rvQueue.dayKey = saved.dayKey || todayKey();
         rvSummary = (saved.extra && saved.extra.summary) || rvSummary;
@@ -518,7 +580,8 @@ async function startStudySession(weakMode, forceNew) {
     }
   } else {
     // V77 (Vấn đề 4 — "Học mới"): đóng phiên đang dở vào nhật ký ngày trước khi thay bằng phiên mới.
-    ssArchiveSession(savedKey, rvQueue);
+    // V179 (1): nếu hàng đợi trong bộ nhớ là buổi LUYỆN TẬP ĐỘC LẬP thì phiên THẬT đang dở nằm ở bản lưu → đóng sổ đúng phiên đó
+    ssArchiveSession(savedKey, rvQueue.practiceOnly ? sqReadPersisted(savedKey) : rvQueue);
     sqClearPersisted(savedKey);
   }
   rvExamplePool = []; rvLastAnswer = null; rvLearner = null; rvAdaptNote = '';
@@ -941,12 +1004,15 @@ async function rvCommitRating(attemptId, chosenRating) {
     : null)).then(data => {
     if (attemptId !== rvAttemptId || currentTab !== 'review') return;
     if (data && data.ok) {
+      rvMarkGraded(item, data.answerCorrect); // V179 (2): server xác nhận đúng/sai → cập nhật dấu `graded` trong bản lưu
       rvLastAnswer = { correct: data.answerCorrect, card: data.card, autoRating: data.debug ? data.debug.autoRating : null, chosen: rvLastAnswer && rvLastAnswer.chosen, multi: rvLastAnswer && rvLastAnswer.multi }; // V131: giữ kết quả 3 phần trên màn đáp án
       if (data.rating) rvFinalRating = data.rating; // server luôn là nguồn sự thật cuối (Phần 20)
     }
     rvRatingPhase = 'done';
     render();
   });
+  // V179 (2): payload đã nằm trong outbox (write-ahead, đồng bộ) → ghi dấu "đã chấm" vào bản lưu NGAY (chỉ localStorage); đúng/sai tạm lấy theo máy, server xác nhận sau.
+  rvMarkGraded(item, rvLastAnswer && rvLastAnswer.correct);
   // V114: lượt đầu sau giới thiệu ĐÃ được giao cho submitFsrsReview — hàm đó ghi outbox (write-ahead, kèm idempotencyKey + exposure) ĐỒNG BỘ trước
   // await đầu tiên, nên tới đây payload đã nằm an toàn trong outbox và việc gửi lại sẽ dùng đúng payload cũ. Tắt cờ + lưu ngay: nếu thẻ quay lại
   // hàng đợi (trả lời sai), hoặc trang bị tải lại giữa chừng, lượt sau KHÔNG bị gắn exposure:'intro' nữa.
@@ -1715,6 +1781,7 @@ function rvAdvanceQueue() {
   if (currentTab !== 'review') return; // user đã rời màn hình, tránh render nhầm chỗ
   rvAdaptNote = ''; // V128: thông báo thích ứng chỉ hiện trong lúc người học làm câu kế tiếp
   const it = rvQueue.items.shift();
+  rvQueue.graded = null; // V179 (2): đã sang câu kế — dấu "đã chấm" hết tác dụng (các lệnh lưu bên dưới sẽ ghi bản không còn dấu)
   const ok = !!(rvLastAnswer && rvLastAnswer.correct);
   if (it && it.type === 'match') {
     // bài ghép cặp: luyện bổ sung, không tính tiến độ FSRS.

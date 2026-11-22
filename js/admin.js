@@ -92,12 +92,16 @@ function renderVocabAdmin() {
   </div>
   <div class="panel">
     <div class="panel-title">📄 Quản lý câu ví dụ bằng file</div>
-    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px;">
-      File Excel (.xlsx) hoặc CSV, dòng đầu là tiêu đề. <b>Mỗi từ 1 dòng, tối đa 3 cặp câu ví dụ</b>: cột <b>hz</b> (chữ Hán của từ) rồi từng cặp <b>zh1, py1, vi1</b> · <b>zh2, py2, vi2</b> · <b>zh3, py3, vi3</b> (zh = câu tiếng Trung — phải chứa từ đó; py = pinyin cả câu, hiện ở màn đáp án; vi = nghĩa tiếng Việt). Cặp 2, 3 để trống nếu không cần; py có thể để trống. Vẫn nhận file kiểu cũ (mỗi dòng 1 câu: hz, zh, py, vi). Nếu câu đã có mà chưa có pinyin thì nhập lại file sẽ bổ sung pinyin.
-      Từ phải đã có trong kho từ vựng; câu đã tồn tại sẽ được bỏ qua. Bấm "Tải file mẫu" để lấy mẫu 3 cặp.</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:10px;line-height:1.5;">
+      <b>Chỉ cần tải lên 1 file</b> (Excel .xlsx hoặc CSV, dòng đầu là tiêu đề), <b>mỗi dòng là 1 câu</b>: <b>hz</b> (từ đang học — phải có trong kho từ vựng) · <b>zh</b> (câu tiếng Trung — phải chứa hz) · <b>cau_py</b> (pinyin câu) · <b>cau_vi</b> (nghĩa câu), rồi (không bắt buộc) các <b>từ mới trong câu</b>: <b>word1, py1, vi1, note1 … word8</b>.
+      App tự <b>tạo câu ví dụ</b> và <b>nhập từ mới trong câu</b> từ cùng một file. Câu đã có sẽ được bỏ qua; từ trong câu đã có cũng bỏ qua trừ khi tích “Ghi đè”. Vẫn nhận các file cũ (mỗi từ 1 dòng tối đa 3 cặp zh1/py1/vi1, hoặc file chỉ có zh + word…). Bấm “Tải file mẫu” để xem đúng định dạng.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
       <input type="file" id="wex-file-input" accept=".xlsx,.xls,.csv" style="font-size:.8rem;max-width:100%;">
-      <button class="btn btn-sm" style="background:var(--l9c);color:var(--l9a);" onclick="uploadExampleFile()">📤 Nhập ví dụ từ file</button>
+      <label style="font-size:.78rem;display:flex;gap:4px;align-items:center"><input type="checkbox" id="wex-overwrite-words"> Ghi đè từ đã có của câu</label>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <button class="btn btn-sm" onclick="previewBundleFile()">👁️ Xem trước</button>
+      <button class="btn btn-sm" style="background:var(--l9c);color:var(--l9a);" onclick="uploadExampleFile()">📤 Nhập file (câu + từ trong câu)</button>
       <button class="btn btn-sm" style="background:var(--l8c);color:var(--l8a);" onclick="downloadExampleTemplate()">⬇️ Tải file mẫu</button>
       <button class="btn btn-sm" style="background:#fdecea;color:#c0392b;" onclick="previewDeleteExamplesByFile()">🗑️ Xoá theo file (xem trước)</button>
     </div>
@@ -337,50 +341,103 @@ async function triggerHanVietGeneration() {
 // ── V156: quản lý câu ví dụ bằng file ──
 function wexEsc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 async function downloadExampleTemplate() {
-  // V170: mẫu DẠNG RỘNG — 1 dòng / 1 từ, tối đa 3 cặp (zh1/py1/vi1 … zh3/py3/vi3)
+  // V180: mẫu GỘP — 1 dòng / 1 câu: hz, zh, cau_py, cau_vi + word1…word8 (chính file này nhập lại được). Sheet "Hướng dẫn" có lời nhắc cho công cụ AI.
   try { await ensureXlsx(); } catch (e) { alert(e.message); return; } // V175: thư viện Excel tải theo nhu cầu
-  const ws = XLSX.utils.json_to_sheet(EXF.TEMPLATE_ROWS);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Ví dụ');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(EXB.TEMPLATE_ROWS), 'Câu');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Hướng dẫn']].concat(EXB.GUIDE_LINES.map((l) => [l]))), 'Hướng dẫn');
   XLSX.writeFile(wb, 'mau-cau-vi-du.xlsx');
 }
-// Đọc file .xlsx/.csv → { rows:[{hz,zh,vi,py}], src } (V170: mỗi dòng có thể chứa tới 3 cặp zh/py/vi — xem js/example-file.js).
-// Tiêu đề không phân biệt hoa/thường/dấu; vẫn nhận file dạng cũ (1 câu / dòng).
-async function readExampleFile() {
+// V180: đọc 1 file duy nhất (sheet "Câu" nếu có, không thì sheet đầu) → EXB.parse: nhận dạng tự động file mới (1 dòng / 1 câu + từ trong câu)
+// và mọi file cũ (câu ví dụ dạng rộng/dài, từ trong câu). Xem js/example-bundle.js.
+async function readBundleFile() {
   const input = document.getElementById('wex-file-input');
   const file = input && input.files && input.files[0];
   if (!file) throw new Error('Chưa chọn file.');
   await ensureXlsx(); // V175
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-  if (!raw.length) throw new Error('File không có dữ liệu.');
-  const out = EXF.expandRows(raw);
-  if (!out.rows.length) throw new Error('Không đọc được dòng nào — kiểm tra dòng tiêu đề (hz, zh1, py1, vi1, zh2, …).');
-  return out;
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const sheet = wb.Sheets['Câu'] || wb.Sheets[wb.SheetNames[0]];
+  const b = EXB.parse(XLSX.utils.sheet_to_json(sheet, { defval: '' }));
+  if (b.fatal) throw new Error(b.fatal);
+  return b;
+}
+// Cho "Xoá theo file": chỉ cần các dòng câu ví dụ { rows:[{hz,zh,vi,py}], src } của file (mọi định dạng).
+async function readExampleFile() {
+  const b = await readBundleFile();
+  if (!b.exampleRows.length) throw new Error('File không có dòng câu ví dụ nào (cần hz + zh + cau_vi) để xoá theo file.');
+  return { rows: b.exampleRows, src: b.exampleSrc, ignoredColumns: b.ignoredColumns };
 }
 function wexLines(list, key) {
   if (!list || !list.length) return '';
   return `<ul style="margin:6px 0 0;padding-left:18px;font-size:.76rem;color:var(--muted);">${list.map(x => `<li>Dòng ${x.line}: ${wexEsc(x.reason)}</li>`).join('')}</ul>`;
 }
 const WEX_CHUNK = 4000; // server nhận tối đa 5000 dòng / lần; mỗi từ có thể ra 3 dòng → gửi theo lô
+function wexModeLabel(mode) { return mode === 'merged' ? 'file gộp (câu + từ trong câu)' : mode === 'words' ? 'file chỉ có từ mới trong câu' : 'file câu ví dụ'; }
+function wexBundleWarnings(b) {
+  const w = [];
+  if (b.noMeaningRows) w.push(`⚠️ ${b.noMeaningRows} dòng có hz + zh nhưng thiếu <b>cau_vi</b> nên KHÔNG tạo câu (từ trong câu vẫn nhập được nếu câu đã có trong kho).`);
+  if (b.ignoredColumns.length) w.push(`⚠️ Bỏ qua cột ${b.ignoredColumns.map(wexEsc).join(', ')} (tối đa ${EXF.MAX_PAIRS} cặp câu / ${SWX.MAX_WORDS} từ mỗi câu).`);
+  return w.join('<br>');
+}
+function wexWordErrors(b) {
+  return b.wordErrors.length ? `<div style="margin-top:4px">⚠️ ${b.wordErrors.length} từ trong câu không hợp lệ (đã bỏ qua):</div><ul style="margin:4px 0 0 18px;padding:0">${b.wordErrors.slice(0, 10).map((x) => `<li>dòng ${x.line}: ${wexEsc(x.reason)}</li>`).join('')}</ul>` : '';
+}
+// V180: MỘT lần nhập cho cả hai việc: ① tạo câu ví dụ → ② nhập từ mới trong câu (server giữ nguyên, mỗi bước dùng lại phần kiểm tra cũ).
 async function uploadExampleFile() {
   const el = document.getElementById('wex-file-result');
   try {
-    const { rows, src, ignoredColumns } = await readExampleFile();
-    const tot = { added: 0, updatedPinyin: 0, duplicate: 0, skippedTotal: 0, withoutPinyin: 0 }; const skipped = [];
-    for (let off = 0; off < rows.length; off += WEX_CHUNK) {
-      el.textContent = `Đang nhập ${Math.min(off + WEX_CHUNK, rows.length)}/${rows.length} câu...`;
-      const res = await fetch('/api/admin/word-examples/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ rows: rows.slice(off, off + WEX_CHUNK) }) });
-      const d = await res.json();
-      if (!d.ok) { el.textContent = '❌ ' + (d.error || 'Có lỗi xảy ra') + (off ? ` (đã nhập xong ${off} câu đầu)` : ''); return; }
-      for (const k of Object.keys(tot)) tot[k] += d[k] || 0;
-      for (const x of d.skipped || []) skipped.push({ line: EXF.labelFor(src, x.line, off), reason: x.reason });
+    const b = await readBundleFile();
+    const overwrite = !!(document.getElementById('wex-overwrite-words') || {}).checked;
+    const out = [];
+    if (b.exampleRows.length) {
+      const rows = b.exampleRows; const src = b.exampleSrc;
+      const tot = { added: 0, updatedPinyin: 0, duplicate: 0, skippedTotal: 0, withoutPinyin: 0 }; const skipped = [];
+      for (let off = 0; off < rows.length; off += WEX_CHUNK) {
+        el.textContent = `Bước ①: đang nhập câu ví dụ ${Math.min(off + WEX_CHUNK, rows.length)}/${rows.length} câu...`;
+        const res = await fetch('/api/admin/word-examples/import', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ rows: rows.slice(off, off + WEX_CHUNK) }) });
+        const d = await res.json();
+        if (!d.ok) { el.textContent = '❌ Bước ① (câu ví dụ): ' + (d.error || 'Có lỗi xảy ra') + (off ? ` (đã nhập xong ${off} câu đầu)` : '') + (b.sentences.length ? ' — chưa nhập từ trong câu.' : ''); return; }
+        for (const k of Object.keys(tot)) tot[k] += d[k] || 0;
+        for (const x of d.skipped || []) skipped.push({ line: EXF.labelFor(src, x.line, off), reason: x.reason });
+      }
+      out.push(`✅ <b>Câu ví dụ:</b> thêm <b>${tot.added}</b> câu${tot.updatedPinyin ? `, bổ sung pinyin cho <b>${tot.updatedPinyin}</b> câu đã có` : ''}, bỏ qua <b>${tot.duplicate}</b> câu đã có, <b>${tot.skippedTotal}</b> câu không hợp lệ.${tot.withoutPinyin ? ` ⚠️ ${tot.withoutPinyin} câu mới thêm chưa có pinyin.` : ''}${wexLines(skipped.slice(0, 50))}`);
     }
-    el.innerHTML = `✅ Đã thêm <b>${tot.added}</b> câu${tot.updatedPinyin ? `, bổ sung pinyin cho <b>${tot.updatedPinyin}</b> câu đã có` : ''}, bỏ qua <b>${tot.duplicate}</b> câu đã có, <b>${tot.skippedTotal}</b> câu không hợp lệ.${tot.withoutPinyin ? ` ⚠️ ${tot.withoutPinyin} câu mới thêm chưa có pinyin.` : ''}${ignoredColumns.length ? ` ⚠️ Bỏ qua cột ${ignoredColumns.map(wexEsc).join(', ')} (chỉ nhận tối đa ${EXF.MAX_PAIRS} cặp).` : ''}${wexLines(skipped.slice(0, 50))}`;
+    if (b.sentences.length) {
+      const r = await sentwPostSentences(b.sentences, false, overwrite, (done, total) => { el.textContent = `Bước ②: đang nhập từ mới trong câu ${done}/${total} câu...`; });
+      if (!r.ok) { el.innerHTML = out.join('<br>') + (out.length ? '<br>' : '') + '❌ Bước ② (từ mới trong câu): ' + wexEsc(r.error) + (r.doneBefore ? ` (đã nhập xong ${r.doneBefore} câu đầu)` : ''); return; }
+      const t = r.tot;
+      out.push(`✅ <b>Từ mới trong câu:</b> ${overwrite ? 'ghi đè' : 'thêm'} <b>${t.wordsAdded}</b> từ cho <b>${t.sentencesTouched}</b> câu${t.wordsSkipped ? `, bỏ qua <b>${t.wordsSkipped}</b> từ đã có` : ''}${t.wordsReplaced ? `, thay <b>${t.wordsReplaced}</b> từ cũ` : ''}${t.notFoundTotal ? `; <b>${t.notFoundTotal}</b> câu không khớp câu ví dụ nào (câu chưa được tạo ở bước ① hoặc zh không y nguyên câu trong kho)` : ''}.` + (r.notFound.length ? `<ul style="margin:4px 0 0 18px;padding:0">${r.notFound.slice(0, 10).map((z) => `<li>không khớp: ${wexEsc(z)}</li>`).join('')}</ul>` : '') + wexWordErrors(b));
+    }
+    const warn = wexBundleWarnings(b); if (warn) out.push(warn);
+    el.innerHTML = out.join('<br>');
     document.getElementById('wex-file-input').value = '';
     loadWordExampleProgress();
     searchWordExamples();
+  } catch (e) { el.textContent = '❌ ' + e.message; }
+}
+// Xem trước: KHÔNG ghi gì. Đếm ngay trên máy; riêng từ trong câu của các câu ĐÃ CÓ sẵn trong kho thì hỏi server (dryRun).
+async function previewBundleFile() {
+  const el = document.getElementById('wex-file-result');
+  try {
+    const b = await readBundleFile();
+    const overwrite = !!(document.getElementById('wex-overwrite-words') || {}).checked;
+    const out = [`👁️ <b>Xem trước</b> (chưa ghi gì) — ${wexModeLabel(b.mode)}, ${b.rowCount} dòng.`];
+    if (b.exampleRows.length) out.push(`① Sẽ thử tạo <b>${b.exampleRows.length}</b> câu ví dụ (server còn kiểm tra: từ có trong kho, câu chứa từ, bỏ câu trùng).`);
+    if (b.sentences.length) {
+      const inFile = new Set(b.exampleRows.map((r) => r.zh));
+      const existing = b.sentences.filter((s) => !inFile.has(s.zh));
+      const nWords = b.sentences.reduce((n, s) => n + s.words.length, 0);
+      let line = `② Có <b>${b.sentences.length}</b> câu kèm <b>${nWords}</b> từ mới trong câu`;
+      if (b.sentences.length - existing.length) line += `; <b>${b.sentences.length - existing.length}</b> câu được tạo cùng lúc ở bước ①`;
+      if (existing.length) {
+        const r = await sentwPostSentences(existing, true, overwrite);
+        if (!r.ok) { el.innerHTML = out.join('<br>') + '<br>❌ ' + wexEsc(r.error); return; }
+        line += `; với <b>${existing.length}</b> câu đã có sẵn trong kho: ${overwrite ? 'ghi đè' : 'thêm'} <b>${r.tot.wordsAdded}</b> từ cho <b>${r.tot.sentencesTouched}</b> câu${r.tot.wordsSkipped ? `, bỏ qua <b>${r.tot.wordsSkipped}</b> từ đã có` : ''}${r.tot.notFoundTotal ? `, <b>${r.tot.notFoundTotal}</b> câu không khớp câu ví dụ nào` : ''}`;
+      }
+      out.push(line + '.' + wexWordErrors(b));
+    }
+    const warn = wexBundleWarnings(b); if (warn) out.push(warn);
+    el.innerHTML = out.join('<br>');
   } catch (e) { el.textContent = '❌ ' + e.message; }
 }
 let wexPendingDelete = null;

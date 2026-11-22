@@ -49,7 +49,7 @@ test('nối dây: index.html nạp example-file.js trước admin.js; admin.js d
   const idx = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.ok(idx.indexOf('/js/example-file.js') > 0 && idx.indexOf('/js/example-file.js') < idx.indexOf('/js/admin.js'));
   const ad = fs.readFileSync(path.join(__dirname, '../js/admin.js'), 'utf8');
-  assert.ok(/EXF\.expandRows/.test(ad) && /WEX_CHUNK = 4000/.test(ad) && /EXF\.TEMPLATE_ROWS/.test(ad) && /tối đa 3 cặp/.test(ad));
+  assert.ok(/EXB\.parse\(/.test(ad) && /_EXF\.expandRows/.test(fs.readFileSync(path.join(__dirname, '../js/example-bundle.js'), 'utf8')) && /WEX_CHUNK = 4000/.test(ad) && /EXB\.TEMPLATE_ROWS/.test(ad) && /tối đa 3 cặp/.test(ad)); // V180: admin.js đọc qua EXB (nhận dạng tự động), EXB vẫn dùng EXF cho file câu ví dụ kiểu cũ
   assert.ok(/WORD_EX_MAX_ROWS = 5000/.test(fs.readFileSync(path.join(__dirname, '../lib/db.js'), 'utf8')));
 });
 console.log(`\n${p} passed, ${f} failed`); process.exit(f ? 1 : 0);

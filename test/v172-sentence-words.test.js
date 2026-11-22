@@ -56,10 +56,10 @@ test('nối dây: 3 khối .rv-ex của Hôm nay học gọi rvExWordsHtml; serv
   const rv = read('js/review.js'); const exLines = rv.split('\n').filter((l) => l.includes('class="rv-ex"') && l.includes('rvExPy('));
   assert.strictEqual(exLines.length, 3); for (const l of exLines) assert.ok(/rvExWordsHtml\(/.test(l));
   const idx = read('index.html'); const pos = (f) => idx.indexOf('/js/' + f);
-  assert.ok(pos('sentence-words-file.js') > 0 && pos('sentence-words-file.js') < pos('admin-sentence-words.js') && pos('admin-sentence-words.js') < pos('admin.js'));
+  assert.ok(pos('sentence-words-file.js') > 0 && pos('sentence-words-file.js') < pos('example-bundle.js') && pos('example-bundle.js') < pos('admin-sentence-words.js') && pos('admin-sentence-words.js') < pos('admin.js')); // V180: thêm js/example-bundle.js (gộp 1 file)
   const api = read('api/index.js'); const seg = api.slice(api.indexOf("app.get('/api/admin/sentence-words/export'"), api.indexOf('async function adminOnly'));
   assert.ok((seg.match(/adminOnly\(req, res\)/g) || []).length === 2 && /SWX\.validateSentences/.test(seg) && /MAX_ROWS/.test(seg));
-  assert.ok(/sentwPanelHtml\(\)/.test(read('js/admin.js')) && /SWX\.parseRows/.test(read('js/admin-sentence-words.js')) && /Hướng dẫn/.test(read('js/admin-sentence-words.js')));
+  assert.ok(/sentwPanelHtml\(\)/.test(read('js/admin.js')) && /EXB\.parse\(/.test(read('js/admin.js')) && /_SWX\.parseRows/.test(read('js/example-bundle.js')) && /Hướng dẫn/.test(read('js/admin-sentence-words.js'))); // V180: việc đọc file từ-trong-câu nay đi qua EXB (1 file duy nhất)
 });
 
 // ── Postgres thật ──

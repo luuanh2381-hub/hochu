@@ -20,6 +20,7 @@ const { readDB, updateDB, updateDBWithFsrsCleanup, getVocabByLessons, getVocabCo
   getWordForAnswerCheck, countKnownFsrsWords, getKnownCountsForUsers, getKnownCountsByLesson,
   getBookDefs, createBookDef, updateBookDef, deleteBookDef, getLessonsByWordIds,
   countDueFsrsCards, // countDueFsrsCards: V104 (tổng quan phân tích năng lực)
+  getCardsReviewedSince, // V179: "Học tiếp" — thẻ nào trong phiên đã lưu đã được ôn ở nơi khác
   getConversations, getConversationWithTurns, getConversationProgressForUser, updateConversationProgress, // V145: thư viện hội thoại
   toggleConversationFavorite, getConversationStats,
   pickConversationsForGen, getConversationForGen, setConversationGenState, saveGeneratedConversation, setConversationApproval, getConversationGenOverview, // V152
@@ -1524,6 +1525,19 @@ app.post('/api/study/session/start', async (req, res) => {
   try {
     const sessionId = await fsrsAnalytics.startExplicitSession(authed.username, new Date());
     res.json({ ok: true, sessionId });
+  } catch (e) { fail(res, e); }
+});
+
+// V179 (audit "Học tiếp" phiên bỏ dở): thẻ nào trong phiên đã lưu ĐÃ được ôn chính thức kể từ lúc phiên bắt đầu (máy/tab khác, outbox gửi muộn)?
+// Client bỏ các thẻ đó khỏi hàng đợi để KHÔNG chấm FSRS lần 2. Chỉ ĐỌC; client coi lỗi/quá thời gian là "không rõ" và vẫn mở phiên bình thường.
+app.get('/api/study/session/reviewed-since', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const since = new Date(Number(req.query.since));
+    const hzs = String(req.query.cards || '').split(',').slice(0, 200).map((p) => { try { return decodeURIComponent(p.split('|')[0]); } catch (e) { return ''; } }).filter(Boolean);
+    const reviewed = await getCardsReviewedSince(authed.username, hzs, since);
+    res.json({ ok: true, reviewed });
   } catch (e) { fail(res, e); }
 });
 

@@ -475,6 +475,7 @@ function sqPersist(mode, sq, extra) {
       lessonFilter: sq.lessonFilter || sqSnapshotLessonFilter(),
       dayKey: sq.dayKey || todayKey(),
       savedAt: Date.now(),
+      graded: sq.graded || null, // V179: thẻ vừa chấm & ghi lên server nhưng CHƯA sang câu kế — khôi phục sẽ không hỏi/chấm lại thẻ đó
       extra: extra || {},
     }));
   } catch {}
