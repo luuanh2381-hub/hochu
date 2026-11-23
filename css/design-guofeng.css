@@ -1055,6 +1055,164 @@ html[data-theme="dark"] .cv-situation-k { color: var(--gf-gold); }
 #content input:not([type=checkbox]):not([type=radio]):not([type=range]), #content select, #content textarea { max-width: 100%; box-sizing: border-box; }
 @media (max-width: 767px) { #content, #content .panel, #content details { max-width: 100%; min-width: 0; } #content .panel, #content details { overflow-x: auto; } }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   9. LỚP HÌNH MỜ THỦY MẶC (CHIM HẠC · HOA SEN · MÂY LÀNH · TRÚC · NÚI XA)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.gf-svg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#gf-backdrop,
+.gf-auth-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  color: #57483a;
+}
+.gf-auth-backdrop {
+  position: absolute;
+}
+html[data-theme="dark"] #gf-backdrop,
+html[data-theme="dark"] .gf-auth-backdrop {
+  color: #c8b8a2;
+}
+
+/* Nội dung chính & hộp đăng nhập luôn nổi trên lớp hình mờ */
+#content, #subnav, .sw-bar { position: relative; z-index: 1; }
+#auth-gate .auth-box { position: relative; z-index: 2; }
+
+/* Từng họa tiết mờ tinh tế — không bao giờ lấn át chữ đọc */
+.gf-wm {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity .35s ease;
+}
+
+/* Đàn chim hạc sải cánh góc trên phải */
+.gf-wm-crane-lg {
+  top: 56px;
+  right: 22px;
+  width: min(290px, 44vw);
+  height: auto;
+  aspect-ratio: 320 / 220;
+  opacity: .16;
+}
+.gf-wm-crane-sm {
+  top: 158px;
+  right: min(230px, 34vw);
+  width: min(145px, 24vw);
+  height: auto;
+  aspect-ratio: 320 / 220;
+  opacity: .11;
+  transform: scaleX(-1) rotate(-6deg);
+}
+
+/* Mây lành Tường Vân trôi nhẹ */
+.gf-wm-cloud-tr {
+  top: 26px;
+  right: min(210px, 28vw);
+  width: min(250px, 42vw);
+  height: auto;
+  aspect-ratio: 260 / 90;
+  opacity: .14;
+}
+.gf-wm-cloud-ml {
+  top: 46%;
+  left: 16px;
+  width: min(210px, 36vw);
+  height: auto;
+  aspect-ratio: 260 / 90;
+  opacity: .11;
+}
+
+/* Cành trúc mực góc trên trái */
+.gf-wm-bamboo {
+  top: 42px;
+  left: -10px;
+  width: min(195px, 34vw);
+  height: auto;
+  aspect-ratio: 220 / 340;
+  opacity: .12;
+}
+
+/* Hoa văn cửa song tròn Trung Hoa (团花窗格) mờ phía sau */
+.gf-wm-medallion {
+  top: 50%;
+  right: -36px;
+  width: min(230px, 38vw);
+  height: auto;
+  aspect-ratio: 1 / 1;
+  transform: translateY(-50%);
+  opacity: .08;
+  color: var(--gf-gold);
+}
+
+/* Đóa hoa sen thủy mặc & lá sen góc dưới trái */
+.gf-wm-lotus {
+  bottom: 58px;
+  left: -12px;
+  width: min(330px, 56vw);
+  height: auto;
+  aspect-ratio: 360 / 320;
+  opacity: .22;
+}
+.gf-auth-backdrop .gf-wm-lotus { bottom: 6px; }
+.gf-auth-backdrop .gf-wm-crane-lg { top: 28px; opacity: .20; }
+.gf-auth-backdrop .gf-wm-bamboo { top: 0; opacity: .15; }
+.gf-auth-backdrop .gf-wm-medallion { opacity: .10; }
+
+/* Rặng núi thủy mặc trải dọc chân trang */
+.gf-wm-mountains {
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: min(185px, 24vh);
+  opacity: .16;
+  color: var(--gf-jade);
+}
+
+/* Dark mode: giảm nhẹ độ đậm để ánh vàng/mực dịu mắt ban đêm */
+html[data-theme="dark"] .gf-wm-crane-lg { opacity: .13; }
+html[data-theme="dark"] .gf-wm-crane-sm { opacity: .09; }
+html[data-theme="dark"] .gf-wm-lotus { opacity: .18; }
+html[data-theme="dark"] .gf-wm-bamboo { opacity: .10; }
+html[data-theme="dark"] .gf-wm-cloud-tr,
+html[data-theme="dark"] .gf-wm-cloud-ml { opacity: .11; }
+html[data-theme="dark"] .gf-wm-mountains { opacity: .14; }
+
+/* Khi ở màn desktop có Sidebar trái (244px): dời hoa sen & trúc sang mép phải sidebar để hiển thị trọn vẹn */
+@media (min-width: 960px) {
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #gf-backdrop .gf-wm-bamboo,
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #gf-backdrop .gf-wm-lotus,
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #gf-backdrop .gf-wm-cloud-ml {
+    left: calc(var(--gf-sidebar-w) + 6px);
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #gf-backdrop .gf-wm-lotus {
+    bottom: 8px;
+  }
+}
+
+/* Khi vào chế độ học Tập trung / Không gian tối đa: làm dịu hình mờ xuống để tập trung tuyệt đối vào chữ Hán */
+body.sw-on[data-sw-layout="focus"] #gf-backdrop,
+body.sw-on[data-sw-layout="max-space"] #gf-backdrop {
+  opacity: .42;
+}
+
+@media (max-width: 480px) {
+  .gf-wm-crane-sm, .gf-wm-cloud-ml { display: none; }
+  .gf-wm-crane-lg { top: 48px; right: 4px; width: 170px; opacity: .15; }
+  .gf-wm-lotus { bottom: 64px; left: -24px; width: 215px; opacity: .19; }
+  .gf-wm-bamboo { top: 44px; left: -18px; width: 120px; opacity: .11; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
