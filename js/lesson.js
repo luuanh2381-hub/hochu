@@ -10,18 +10,18 @@
 // nguyên bên dưới làm lối vào phụ (khi user chủ động muốn luyện 1 kiểu cụ thể).
 function renderHome() {
   return `
-  ${isLoggedIn() ? `<div class="panel" id="home-quickstart-panel"><div id="home-quickstart" class="study-empty">Đang tải...</div></div>` : ''}
+  ${isLoggedIn() ? `<div class="panel duo-home-hero" id="home-quickstart-panel"><div id="home-quickstart" class="study-empty">Đang tải...</div></div>` : ''}
   <div class="panel">
     <div class="panel-title">Chọn bài học</div>
     ${lessonFilterHtml()}
   </div>
   <div class="panel">
     <div class="panel-title">Bắt đầu học nhanh</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-      <button class="btn btn-primary" onclick="ssEnterMode('flash')">📖 Flashcard</button>
-      <button class="btn" style="background:var(--l8c);color:var(--l8a);" onclick="ssEnterMode('quiz')">📝 Trắc nghiệm</button>
-      <button class="btn" style="background:var(--l9c);color:var(--l9a);" onclick="ssEnterMode('listen')">🎧 Nghe chọn</button>
-      <button class="btn" style="background:var(--l10c);color:var(--l10a);" onclick="ssEnterMode('type')">⌨️ Gõ chữ</button>
+    <div class="duo-quick-grid">
+      <button class="btn duo-quick-btn duo-quick-green" onclick="ssEnterMode('flash')"><span class="dq-ic">📖</span><span>Flashcard</span><span class="dq-sub">Lật thẻ ghi nhớ</span></button>
+      <button class="btn duo-quick-btn duo-quick-blue" onclick="ssEnterMode('quiz')"><span class="dq-ic">📝</span><span>Trắc nghiệm</span><span class="dq-sub">Chọn đáp án nhanh</span></button>
+      <button class="btn duo-quick-btn duo-quick-purple" onclick="ssEnterMode('listen')"><span class="dq-ic">🎧</span><span>Nghe chọn</span><span class="dq-sub">Luyện phản xạ tai</span></button>
+      <button class="btn duo-quick-btn duo-quick-orange" onclick="ssEnterMode('type')"><span class="dq-ic">⌨️</span><span>Gõ chữ</span><span class="dq-sub">Nhớ mặt chữ &amp; Pinyin</span></button>
     </div>
   </div>`;
 }
@@ -43,8 +43,8 @@ async function loadHomeQuickstart() {
     return;
   }
   area.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:10px;font-size:.85rem;color:var(--muted);font-weight:700;">
-      <span>🔴 ${data.dueCount} cần ôn</span><span>🆕 ${data.newInCurrentLesson} từ mới</span>
+    <div class="duo-home-stats">
+      <span class="duo-stat-pill is-due">🔴 ${data.dueCount} cần ôn</span><span class="duo-stat-pill is-new">🆕 ${data.newInCurrentLesson} từ mới</span>
     </div>
     ${data.blockedByBacklog ? `<div style="font-size:.78rem;color:var(--muted);text-align:center;margin-bottom:10px;">⏳ Từ mới đang tạm khoá vì phạm vi đang chọn còn ${data.totalDue} thẻ đến hạn, nhiều hơn số lượt ôn còn lại hôm nay — tắt "Chỉ học từ mới sau khi hết backlog ôn tập" trong Cài đặt hằng ngày nếu muốn học từ mới ngay.</div>` : ''}
     <button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">▶️ Bắt đầu học</button>`;
@@ -231,10 +231,10 @@ function renderTodayPanel(data) {
     const planned = done + (data.dueCount || 0) + (data.newInCurrentLesson || 0);
     if (planned > 0) {
       const pct = Math.round((done / planned) * 100);
-      progressHtml = `<div style="margin:2px 0 12px">
-        <div style="display:flex;justify-content:space-between;font-size:.8rem;font-weight:700"><span>Tiến độ nhiệm vụ hôm nay</span><span>${done}/${planned} thẻ (${pct}%)</span></div>
-        <div style="height:10px;border-radius:5px;background:var(--active);overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.max(pct, 2)}%;background:var(--l8a,#27ae60)"></div></div>
-        <div style="font-size:.7rem;color:var(--muted);margin-top:3px">${dl.unlimited ? 'Chế độ học không giới hạn mỗi ngày' : `Giới hạn ngày: ôn ${dl.reviewLimit} · từ mới ${dl.newLimit}`} · <b>Đây là tiến độ làm bài, không phải % từ đã nhớ lâu dài.</b></div></div>`;
+      progressHtml = `<div class="td-prog-box">
+        <div class="td-prog-head"><span>Tiến độ nhiệm vụ hôm nay</span><span>${done}/${planned} thẻ (${pct}%)</span></div>
+        <div class="td-prog-track"><div class="td-prog-fill" style="width:${Math.max(pct, 4)}%"></div></div>
+        <div class="td-prog-note">${dl.unlimited ? 'Chế độ học không giới hạn mỗi ngày' : `Giới hạn ngày: ôn ${dl.reviewLimit} · từ mới ${dl.newLimit}`} · <b>Đây là tiến độ làm bài, không phải % từ đã nhớ lâu dài.</b></div></div>`;
     }
   }
 
@@ -263,7 +263,7 @@ function renderTodayPanel(data) {
     else if ((data.newInCurrentLesson || 0) > 0) goal = `Học ${data.newInCurrentLesson} từ mới của Bài ${data.currentLesson}.`;
     else if (b && b.weakSkill > 0) goal = `Luyện thêm kỹ năng yếu của ${b.weakSkill} từ (luyện bổ sung, không đổi lịch FSRS).`;
     else if (b && b.delayed > 0) goal = `Kiểm tra lại sau khoảng nghỉ cho ${b.delayed} từ.`;
-    if (goal) goalHtml = `<div style="font-size:.85rem;font-weight:800;margin:0 0 10px;padding:8px 10px;border-radius:10px;background:var(--active)">🎯 Mục tiêu chính: ${goal}</div>`;
+    if (goal) goalHtml = `<div class="td-goal-banner">🎯 Mục tiêu chính: ${goal}</div>`;
   }
   let unique = '';
   if (b) {
@@ -340,7 +340,6 @@ function renderTodayPanel(data) {
       ${tdMemoryDetailHtml(mem)}
     </details>`;
   return `
-    <style>.td-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.td-sum-cell{background:var(--paper);border:1px solid var(--border);border-radius:12px;padding:10px 4px;text-align:center}.td-sum-num{font-size:1.3rem;font-weight:900}.td-sum-lbl{font-size:.68rem;color:var(--muted);font-weight:700;margin-top:2px;line-height:1.25}.td-limit{font-size:.72rem;color:var(--muted);font-weight:700;text-align:center;margin:-4px 0 8px}</style>
     ${goalHtml}
     ${nothingToDo
       ? `<div class="study-empty" style="margin:8px 0">🎉 Bạn đã ôn hết thẻ đến hạn và học hết từ mới của Bài ${escapeHtml(String(data.currentLesson))} hôm nay!<br><span style="font-size:.8rem">Muốn học thêm? Chọn một chế độ luyện bổ sung bên dưới, hoặc chọn thêm Quyển/bài ở Trang chủ.</span></div>`

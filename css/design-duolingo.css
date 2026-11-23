@@ -1,0 +1,1361 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   css/design-duolingo.css — GIAO DIỆN PHONG CÁCH DUOLINGO (CHỈ GIAO DIỆN, KHÔNG ĐỤNG FSRS CORE)
+   Nạp SAU styles.css và conversation-v155.css. Xoá thẻ <link> này là quay về giao diện nền.
+   Nguyên tắc Duolingo:
+     • Bảng màu rực rỡ, thân thiện: Feather Green (#58CC02), Macaw Blue (#1CB0F6),
+       Fox Orange (#FF9600), Cardinal Red (#FF4B4B), Beetle Purple (#CE82FF), Bee Gold (#FFC800).
+     • Nút bấm & thẻ có viền 2px + gờ đáy 3D (box-shadow: 0 4px 0) lún xuống khi chạm.
+     • Thanh tiến độ dày bo tròn có vệt bóng sáng đặc trưng (glossy highlight).
+     • Mobile: thanh điều hướng đáy 4 mục · Desktop (≥960px): thanh Sidebar bên trái kiểu Duolingo.
+     • Dark Mode đồng bộ chuẩn Duolingo (#131F24 / #202F36 / #37464F).
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --font: 'Nunito', 'Segoe UI', system-ui, -apple-system, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-han: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', serif;
+
+  /* ── Duolingo Light Palette ── */
+  --duo-green: #58cc02;
+  --duo-green-dark: #58a700;
+  --duo-green-light: #d7ffb8;
+  --duo-green-border: #a5ed6e;
+
+  --duo-blue: #1cb0f6;
+  --duo-blue-dark: #1899d6;
+  --duo-blue-light: #ddf4ff;
+  --duo-blue-border: #84d8ff;
+
+  --duo-orange: #ff9600;
+  --duo-orange-dark: #cc7800;
+  --duo-orange-light: #fff4d6;
+  --duo-orange-border: #ffd27d;
+
+  --duo-red: #ff4b4b;
+  --duo-red-dark: #ea2b2b;
+  --duo-red-light: #ffdfe0;
+  --duo-red-border: #ff9f9f;
+
+  --duo-purple: #ce82ff;
+  --duo-purple-dark: #a568cc;
+  --duo-purple-ink: #8a3ec2;
+  --duo-purple-light: #f5e6ff;
+  --duo-purple-border: #dfb0ff;
+
+  --duo-gold: #ffc800;
+  --duo-gold-dark: #e5a400;
+  --duo-gold-light: #fff8d6;
+
+  /* ── Core Tokens (tương thích 100% biến sẵn có trong toàn app) ── */
+  --heading: #3c3c3c;
+  --ink: #3c3c3c;
+  --ink-2: #4b4b4b;
+  --paper: #f7f7f7;
+  --card: #ffffff;
+  --muted: #777777;
+  --border: #e5e5e5;
+  --border-strong: #cecece;
+
+  --radius-sm: 14px;
+  --radius: 18px;
+  --radius-lg: 22px;
+  --shadow-xs: 0 2px 0 var(--border);
+  --shadow: 0 4px 0 var(--border);
+  --shadow-md: 0 5px 0 var(--border);
+  --shadow-btn: 0 4px 0 var(--duo-green-dark);
+
+  --on-active: #ffffff;
+  --active: var(--duo-green);
+  --active-dark: var(--duo-green-dark);
+  --active-bg: var(--duo-green-light);
+  --correct: var(--duo-green);
+  --ok: var(--duo-green);
+  --wrong: var(--duo-red);
+  --fail: var(--duo-red);
+  --seal: var(--duo-orange);
+  --gold: var(--duo-gold);
+
+  /* ── Lesson & Accent Tokens (sáng tươi kiểu Duolingo) ── */
+  --l1a:#ea2b2b;  --l1b:#ffdfe0; --l1c:#ffbfc1;
+  --l2a:#cc7800;  --l2b:#fff4d6; --l2c:#ffe0a3;
+  --l3a:#b88200;  --l3b:#fff8d6; --l3c:#ffeb99;
+  --l4a:#46a302;  --l4b:#d7ffb8; --l4c:#b8f28b;
+  --l5a:#009988;  --l5b:#d6faf5; --l5c:#9bece0;
+  --l6a:#1899d6;  --l6b:#ddf4ff; --l6c:#a8e2ff;
+  --l7a:#cc7800;  --l7b:#fff4d6; --l7c:#ffe0a3;
+  --l8a:#46a302;  --l8b:#d7ffb8; --l8c:#b8f28b;
+  --l9a:#1899d6;  --l9b:#ddf4ff; --l9c:#a8e2ff;
+  --l10a:#ea2b2b; --l10b:#ffdfe0; --l10c:#ffbfc1;
+  --l11a:#8a3ec2; --l11b:#f5e6ff; --l11c:#e2bdff;
+  --l12a:#009988; --l12b:#d6faf5; --l12c:#9bece0;
+  --l13a:#b88200; --l13b:#fff8d6; --l13c:#ffeb99;
+  --l14a:#5b6970; --l14b:#eef2f4; --l14c:#d5dde1;
+  --l15a:#4b5c66; --l15b:#eef2f4; --l15c:#cdd6db;
+
+  --duo-sidebar-w: 244px;
+}
+
+/* ── DUOLINGO DARK MODE (#131F24 chuẩn Duolingo App) ── */
+html[data-theme="dark"] {
+  --duo-green: #58cc02;
+  --duo-green-dark: #46a302;
+  --duo-green-light: rgba(88, 204, 2, .16);
+  --duo-green-border: #58cc02;
+
+  --duo-blue: #49c0f8;
+  --duo-blue-dark: #1899d6;
+  --duo-blue-light: rgba(73, 192, 248, .15);
+  --duo-blue-border: #38a8df;
+
+  --duo-orange: #ffab33;
+  --duo-orange-dark: #cc7800;
+  --duo-orange-light: rgba(255, 171, 51, .16);
+  --duo-orange-border: #cc7800;
+
+  --duo-red: #ff5252;
+  --duo-red-dark: #cc2929;
+  --duo-red-light: rgba(255, 82, 82, .16);
+  --duo-red-border: #cc2929;
+
+  --duo-purple: #ce82ff;
+  --duo-purple-dark: #934dc2;
+  --duo-purple-ink: #d99cff;
+  --duo-purple-light: rgba(206, 130, 255, .16);
+  --duo-purple-border: #934dc2;
+
+  --duo-gold: #ffd43b;
+  --duo-gold-dark: #d9a000;
+  --duo-gold-light: rgba(255, 212, 59, .15);
+
+  --heading: #f7f7f7;
+  --ink: #f1f7fa;
+  --ink-2: #c5d5de;
+  --paper: #131f24;
+  --card: #1b2b33;
+  --muted: #8ca1ad;
+  --border: #37464f;
+  --border-strong: #465863;
+
+  --shadow-xs: 0 2px 0 #0d161a;
+  --shadow: 0 4px 0 #0d161a;
+  --shadow-md: 0 5px 0 #0d161a;
+
+  --on-active: #131f24;
+  --active: #58cc02;
+  --active-dark: #46a302;
+  --active-bg: rgba(88, 204, 2, .16);
+  --correct: #7ae52a;
+  --ok: #7ae52a;
+  --wrong: #ff6b6b;
+  --fail: #ff6b6b;
+  --seal: #ffab33;
+  --gold: #ffd43b;
+
+  --l1a:#ff6b6b;  --l1b:#321b1e; --l1c:#4a2328;
+  --l2a:#ffab33;  --l2b:#332613; --l2c:#4a3519;
+  --l3a:#ffd43b;  --l3b:#312b14; --l3c:#4a401a;
+  --l4a:#7ae52a;  --l4b:#1a2f18; --l4c:#264721;
+  --l5a:#40dfd0;  --l5b:#142d2d; --l5c:#1d4242;
+  --l6a:#49c0f8;  --l6b:#142a38; --l6c:#1c3d52;
+  --l7a:#ffab33;  --l7b:#332613; --l7c:#4a3519;
+  --l8a:#7ae52a;  --l8b:#1a2f18; --l8c:#264721;
+  --l9a:#49c0f8;  --l9b:#142a38; --l9c:#1c3d52;
+  --l10a:#ff6b6b; --l10b:#321b1e; --l10c:#4a2328;
+  --l11a:#d99cff; --l11b:#2a1d36; --l11c:#3f2a52;
+  --l12a:#40dfd0; --l12b:#142d2d; --l12c:#1d4242;
+  --l13a:#ffd43b; --l13b:#312b14; --l13c:#4a401a;
+  --l14a:#a9bbc4; --l14b:#1f2d35; --l14c:#2c3f4a;
+  --l15a:#a9bbc4; --l15b:#1f2d35; --l15c:#2c3f4a;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   1. NỀN, CHỮ & TIÊU ĐỀ
+   ═══════════════════════════════════════════════════════════════════════════ */
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+body {
+  font-family: var(--font);
+  background: var(--card);
+  background-image: none;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  line-height: 1.5;
+}
+html[data-theme="dark"] body {
+  background: var(--paper);
+}
+
+::selection { background: var(--duo-blue-light); color: var(--ink); }
+:focus-visible { outline: 3px solid var(--duo-blue); outline-offset: 2px; }
+button:focus:not(:focus-visible) { outline: none; }
+
+h1, h2, h3, .section-title, .panel-title, .cv-h, .card-title, #content h2 {
+  font-family: var(--font);
+  font-weight: 900;
+  color: var(--heading);
+}
+
+/* Hán tự lớn: rõ nét, cân đối */
+.fc-hz, .fc-hz-back, .rv-hz, .type-hz-big, .dict-hz, .weak-hz, .confuse-hz, .hp-char,
+.listen-sentence, .aib-hz, .quiz-q .hz, .cv-zh, .cv-title-zh, .cv-card-zh {
+  font-family: var(--font-han);
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--heading);
+}
+.fc-py, .rv-py, .cv-py {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--duo-blue-dark);
+  letter-spacing: .02em;
+}
+html[data-theme="dark"] .fc-py,
+html[data-theme="dark"] .rv-py,
+html[data-theme="dark"] .cv-py {
+  color: var(--duo-blue);
+}
+.fc-hv, .rv-hv {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--duo-orange-light);
+  color: var(--duo-orange-dark);
+  border: 1.5px solid var(--duo-orange-border);
+  font-weight: 800;
+  font-size: .76rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+html[data-theme="dark"] .fc-hv,
+html[data-theme="dark"] .rv-hv {
+  color: var(--duo-orange);
+}
+.rv-vi, .fc-vi { color: var(--heading); font-weight: 800; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2. KHUNG HEADER (TOPBAR) & BẢNG HIỂN THỊ
+   ═══════════════════════════════════════════════════════════════════════════ */
+#topbar {
+  background: var(--card);
+  border-bottom: 2px solid var(--border);
+  box-shadow: none;
+  padding: max(8px, env(safe-area-inset-top)) 14px 8px;
+  gap: 8px;
+}
+html[data-theme="dark"] #topbar {
+  background: var(--paper);
+}
+#topbar h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.05rem;
+  font-weight: 900;
+  letter-spacing: -.02em;
+  color: var(--duo-green);
+}
+.duo-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--duo-green);
+  color: #fff;
+  box-shadow: 0 3px 0 var(--duo-green-dark);
+  flex-shrink: 0;
+}
+.duo-brand-mark svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.brand-text {
+  color: var(--duo-green);
+  font-weight: 900;
+  font-size: 1.05rem;
+}
+
+#streak-badge {
+  background: var(--duo-orange-light);
+  color: var(--duo-orange-dark);
+  border: 2px solid var(--duo-orange-border);
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 900;
+  box-shadow: 0 2px 0 var(--duo-orange-border);
+}
+html[data-theme="dark"] #streak-badge { color: var(--duo-orange); }
+
+#study-timer-chip {
+  background: var(--duo-blue-light) !important;
+  color: var(--duo-blue-dark) !important;
+  border: 2px solid var(--duo-blue-border);
+  padding: 4px 11px !important;
+  border-radius: 999px !important;
+  font-size: .76rem !important;
+  font-weight: 900 !important;
+}
+html[data-theme="dark"] #study-timer-chip { color: var(--duo-blue) !important; }
+
+#user-badge {
+  background: var(--duo-purple-light);
+  color: var(--duo-purple-ink);
+  border: 2px solid var(--duo-purple-border);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 800;
+  box-shadow: 0 2px 0 var(--duo-purple-border);
+}
+#user-badge:active { transform: translateY(2px); box-shadow: none; }
+
+.display-btn {
+  background: var(--card);
+  border: 2px solid var(--border);
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 5px 10px;
+  font-size: .92rem;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--border);
+}
+.display-btn:hover { border-color: var(--duo-blue); }
+.display-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--border); }
+#display-dot { background: var(--duo-orange); border-color: var(--card); }
+
+#display-panel {
+  border: 2px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 20px 20px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .12);
+  padding: 14px 16px;
+}
+.dp-section-lbl {
+  font-size: .68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin: 8px 0 4px;
+}
+.dp-section-lbl:first-child { margin-top: 0; }
+.theme-toggle, .speed-control {
+  background: var(--paper);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 6px 10px;
+}
+.theme-toggle {
+  box-shadow: 0 3px 0 var(--border);
+  font-weight: 800;
+}
+.theme-toggle:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--border); }
+.pinyin-toggle {
+  background: var(--duo-blue-light);
+  color: var(--duo-blue-dark);
+  border: 2px solid var(--duo-blue-border);
+  border-radius: 12px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--duo-blue-border);
+}
+html[data-theme="dark"] .pinyin-toggle { color: var(--duo-blue); }
+.pinyin-toggle:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--duo-blue-border); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3. THANH ĐIỀU HƯỚNG (MOBILE BOTTOM BAR + DESKTOP LEFT SIDEBAR KIỂU DUOLINGO)
+   ═══════════════════════════════════════════════════════════════════════════ */
+#nav {
+  background: var(--card);
+  border-top: 2px solid var(--border);
+  box-shadow: none;
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+  gap: 6px;
+}
+html[data-theme="dark"] #nav { background: var(--paper); }
+
+#nav button {
+  color: var(--muted);
+  border: 2px solid transparent;
+  border-radius: 14px;
+  padding: 6px 4px;
+  min-height: 50px;
+  gap: 3px;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .1s ease;
+}
+#nav button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+#nav button .nav-ic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+}
+#nav button .nav-ic svg {
+  width: 24px;
+  height: 24px;
+}
+#nav button .nav-lb {
+  font-size: .7rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+#nav button.active {
+  background: var(--duo-blue-light);
+  border-color: var(--duo-blue-border);
+  color: var(--duo-blue-dark);
+}
+html[data-theme="dark"] #nav button.active {
+  color: var(--duo-blue);
+}
+#nav button.active .nav-lb { font-weight: 900; }
+
+/* Bảng "Thêm" */
+#more-sheet {
+  border: 2px solid var(--border);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, .14);
+  padding: 10px;
+}
+#more-sheet button {
+  font-weight: 800;
+  font-size: .95rem;
+  border-radius: 14px;
+  padding: 13px 16px;
+  border: 2px solid transparent;
+  margin-bottom: 4px;
+}
+#more-sheet button:last-child { margin-bottom: 0; }
+#more-sheet button:hover,
+#more-sheet button:active {
+  background: var(--duo-blue-light);
+  border-color: var(--duo-blue-border);
+  color: var(--duo-blue-dark);
+}
+html[data-theme="dark"] #more-sheet button:hover { color: var(--duo-blue); }
+
+/* Chip phụ (#subnav) */
+#subnav {
+  gap: 8px;
+  padding: 12px 16px 2px;
+  max-width: 780px;
+}
+.nav-chip {
+  border: 2px solid var(--border);
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: .78rem;
+  font-weight: 800;
+  padding: 8px 14px;
+  border-radius: 14px;
+  box-shadow: 0 3px 0 var(--border);
+  transition: transform .1s ease, box-shadow .1s ease, background .15s ease;
+}
+.nav-chip:hover {
+  border-color: var(--duo-blue-border);
+  color: var(--duo-blue-dark);
+}
+.nav-chip:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--border);
+}
+.nav-chip.active {
+  border-color: var(--duo-blue);
+  background: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 3px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .nav-chip.active { color: #131f24; }
+
+/* ── DESKTOP SIDEBAR CHUẨN DUOLINGO (≥ 960px) ── */
+@media (min-width: 960px) {
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: auto;
+    width: var(--duo-sidebar-w);
+    max-width: none;
+    margin: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 82px 14px 20px;
+    border-top: none;
+    border-right: 2px solid var(--border);
+    gap: 8px;
+    z-index: 95;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #nav::before {
+    content: "学中文";
+    position: absolute;
+    top: 20px;
+    left: 22px;
+    font-size: 1.55rem;
+    font-weight: 900;
+    color: var(--duo-green);
+    letter-spacing: -.02em;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #nav button {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 12px 16px;
+    min-height: 50px;
+    border-radius: 14px;
+    text-align: left;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #nav button .nav-lb {
+    font-size: .88rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #app-header {
+    margin-left: var(--duo-sidebar-w);
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #topbar h1 {
+    display: none;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #subnav,
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #content,
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) .sw-bar,
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) .sw-panel {
+    margin-left: calc(var(--duo-sidebar-w) + max(24px, (100vw - var(--duo-sidebar-w) - 820px) / 2));
+    margin-right: auto;
+    max-width: 820px;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #content {
+    padding-bottom: 40px;
+  }
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) #more-sheet {
+    left: calc(var(--duo-sidebar-w) + 12px);
+    right: auto;
+    bottom: auto;
+    top: 280px;
+    width: 260px;
+    max-width: none;
+    margin: 0;
+    border-radius: 18px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .16);
+  }
+  /* Thanh phát hội thoại căn giữa theo vùng nội dung bên phải sidebar */
+  body:not(.sw-on[data-sw-layout="focus"]):not(.sw-on[data-sw-layout="max-space"]) .cv-dock {
+    left: calc(var(--duo-sidebar-w) + (100vw - var(--duo-sidebar-w)) / 2);
+    bottom: 20px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4. CARD, PANEL & NÚT BẤM 3D ĐẶC TRƯNG DUOLINGO
+   ═══════════════════════════════════════════════════════════════════════════ */
+#content {
+  max-width: 780px;
+  animation-duration: .25s;
+}
+
+.panel {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 0 var(--border);
+  padding: 20px;
+  margin-bottom: 18px;
+}
+html[data-theme="dark"] .panel {
+  border-color: var(--border);
+  box-shadow: 0 4px 0 #0d161a;
+}
+
+.panel-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 0;
+  font-size: .82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.panel-title::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--duo-green);
+  flex-shrink: 0;
+}
+
+/* ── Nút 3D chuẩn Duolingo ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--card);
+  color: var(--ink);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 20px;
+  font-size: .92rem;
+  font-weight: 800;
+  letter-spacing: .02em;
+  box-shadow: 0 4px 0 var(--border);
+  cursor: pointer;
+  transition: transform .08s ease, box-shadow .08s ease, filter .15s ease, background .15s ease, border-color .15s ease;
+}
+.btn:hover:not(:disabled) {
+  background: var(--paper);
+  border-color: var(--border-strong);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--border);
+}
+.btn[disabled], .btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--duo-green);
+  border-color: var(--duo-green);
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-weight: 900;
+  box-shadow: 0 4px 0 var(--duo-green-dark);
+}
+.btn-primary:hover:not(:disabled) {
+  background: #61e002;
+  border-color: #61e002;
+  color: #ffffff;
+  filter: none;
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--duo-green-dark);
+}
+html[data-theme="dark"] .btn-primary,
+html[data-theme="dark"] .btn-primary:hover:not(:disabled) {
+  color: #131f24;
+}
+
+.btn-sm {
+  padding: 8px 14px;
+  min-height: 38px;
+  border-radius: 12px;
+  font-size: .82rem;
+  box-shadow: 0 3px 0 var(--border);
+}
+.btn-primary.btn-sm { box-shadow: 0 3px 0 var(--duo-green-dark); }
+
+.btn-sound {
+  background: var(--duo-blue);
+  border-color: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 4px 0 var(--duo-blue-dark);
+}
+.btn-sound:hover:not(:disabled) {
+  background: #2cbcff;
+  border-color: #2cbcff;
+  color: #ffffff;
+}
+.btn-sound:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .btn-sound { color: #131f24; }
+
+/* 4 nút học nhanh đầy màu sắc kiểu Duolingo trên Trang chủ */
+.duo-quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.duo-quick-btn {
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 6px;
+  border-radius: 18px;
+  font-size: .92rem;
+  font-weight: 900;
+  color: #ffffff !important;
+  text-transform: none;
+}
+.duo-quick-btn .dq-ic { font-size: 1.5rem; line-height: 1; }
+.duo-quick-btn .dq-sub { font-size: .72rem; font-weight: 700; opacity: .9; }
+.duo-quick-green  { background: var(--duo-green) !important;  border-color: var(--duo-green) !important;  box-shadow: 0 4px 0 var(--duo-green-dark) !important; }
+.duo-quick-blue   { background: var(--duo-blue) !important;   border-color: var(--duo-blue) !important;   box-shadow: 0 4px 0 var(--duo-blue-dark) !important; }
+.duo-quick-purple { background: #a855f7 !important;           border-color: #a855f7 !important;           box-shadow: 0 4px 0 #7e22ce !important; }
+.duo-quick-orange { background: var(--duo-orange) !important; border-color: var(--duo-orange) !important; box-shadow: 0 4px 0 var(--duo-orange-dark) !important; }
+.duo-quick-btn:hover { filter: brightness(1.06); }
+.duo-quick-btn:active { transform: translateY(3px) !important; box-shadow: 0 1px 0 rgba(0,0,0,.22) !important; }
+html[data-theme="dark"] .duo-quick-green,
+html[data-theme="dark"] .duo-quick-blue,
+html[data-theme="dark"] .duo-quick-orange { color: #131f24 !important; }
+
+/* ── Ô nhập liệu ── */
+input, select, textarea {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+  font-weight: 700;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--duo-blue);
+  background: var(--card);
+  box-shadow: 0 0 0 3px var(--duo-blue-light);
+}
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--duo-green); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   5. ĐĂNG NHẬP & MODAL (PHONG CÁCH DUOLINGO)
+   ═══════════════════════════════════════════════════════════════════════════ */
+#auth-gate {
+  background: radial-gradient(circle at 20% 10%, var(--duo-green-light), transparent 45%),
+              radial-gradient(circle at 85% 90%, var(--duo-blue-light), transparent 45%),
+              var(--card);
+}
+html[data-theme="dark"] #auth-gate {
+  background: radial-gradient(circle at 20% 10%, rgba(88, 204, 2, .12), transparent 45%),
+              radial-gradient(circle at 85% 90%, rgba(73, 192, 248, .12), transparent 45%),
+              var(--paper);
+}
+.duo-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(19, 31, 36, .55);
+  backdrop-filter: blur(4px);
+  z-index: 998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.duo-modal-backdrop.z-top { z-index: 999; }
+
+.auth-box {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 6px 0 var(--border), 0 18px 40px rgba(0, 0, 0, .14);
+  padding: 28px 24px;
+}
+.duo-mascot-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.duo-mascot {
+  width: 68px;
+  height: 68px;
+  animation: popIn .45s cubic-bezier(.2, .8, .3, 1);
+}
+.auth-title {
+  font-family: var(--font);
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--duo-green);
+}
+.auth-sub { font-weight: 700; color: var(--muted); }
+.auth-tabs {
+  background: var(--paper);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 4px;
+}
+.auth-tab { border-radius: 10px; font-weight: 800; }
+.auth-tab.active {
+  background: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 3px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .auth-tab.active { color: #131f24; }
+.auth-field input {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+  padding: 12px 14px;
+}
+.auth-submit {
+  background: var(--duo-green);
+  color: #ffffff;
+  border-radius: 16px;
+  padding: 13px;
+  font-size: .95rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  box-shadow: 0 4px 0 var(--duo-green-dark);
+}
+.auth-submit:hover:not(:disabled) { filter: brightness(1.05); }
+.auth-submit:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--duo-green-dark);
+}
+html[data-theme="dark"] .auth-submit { color: #131f24; }
+
+.duo-btn-blue   { background: var(--duo-blue) !important;   box-shadow: 0 4px 0 var(--duo-blue-dark) !important; }
+.duo-btn-purple { background: #a855f7 !important;           box-shadow: 0 4px 0 #7e22ce !important; color: #fff !important; }
+.duo-btn-orange { background: var(--duo-orange) !important; box-shadow: 0 4px 0 var(--duo-orange-dark) !important; }
+.duo-btn-red    { background: var(--duo-red) !important;    box-shadow: 0 4px 0 var(--duo-red-dark) !important; color: #fff !important; }
+.auth-error {
+  background: var(--duo-red-light);
+  color: var(--duo-red-dark);
+  border: 2px solid var(--duo-red-border);
+  border-radius: 12px;
+  font-weight: 800;
+}
+html[data-theme="dark"] .auth-error { color: var(--duo-red); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   6. CHỌN QUYỂN / BÀI (TRANG CHỦ — UNIT TILES KIỂU DUOLINGO)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.book-group-label {
+  font-size: .74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.book-card {
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 4px 0 var(--border);
+  padding: 14px 10px;
+  transition: transform .08s ease, box-shadow .08s ease, border-color .15s ease, background .15s ease;
+}
+.book-card:hover {
+  border-color: var(--duo-blue-border);
+  background: var(--duo-blue-light);
+}
+.book-card:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--border);
+}
+.book-card.sel {
+  background: var(--duo-green);
+  border-color: var(--duo-green);
+  box-shadow: 0 4px 0 var(--duo-green-dark);
+}
+.book-card.sel .book-card-name,
+.book-card.sel .book-card-count { color: #ffffff; }
+html[data-theme="dark"] .book-card.sel .book-card-name,
+html[data-theme="dark"] .book-card.sel .book-card-count { color: #131f24; }
+
+.lbtn {
+  border-width: 2px;
+  border-radius: 999px;
+  font-weight: 800;
+  padding: 7px 14px;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, .10);
+}
+.lbtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, .10); }
+.lbtn.sel { color: #ffffff !important; box-shadow: 0 3px 0 rgba(0, 0, 0, .2); }
+html[data-theme="dark"] .lbtn.sel { color: #131f24 !important; }
+
+/* ── Thanh tiến độ Duolingo dày + vệt sáng bóng ── */
+.prog-bar, .rv-progress-wrap, .td-prog-track {
+  height: 14px;
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.prog-fill, .rv-progress-fill, .td-prog-fill {
+  position: relative;
+  height: 100%;
+  background: var(--duo-green);
+  border-radius: 999px;
+  transition: width .45s cubic-bezier(.2, .8, .3, 1);
+}
+.prog-fill::after, .rv-progress-fill::after, .td-prog-fill::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 6px;
+  right: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .32);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   7. HÔM NAY HỌC & HERO BANNER
+   ═══════════════════════════════════════════════════════════════════════════ */
+.td-goal-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: .9rem;
+  font-weight: 800;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--duo-blue-light);
+  border: 2px solid var(--duo-blue-border);
+  color: var(--duo-blue-dark);
+  box-shadow: 0 3px 0 var(--duo-blue-border);
+}
+html[data-theme="dark"] .td-goal-banner { color: var(--duo-blue); }
+
+.td-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 14px 0;
+}
+.td-sum-cell {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 6px;
+  text-align: center;
+  box-shadow: 0 4px 0 var(--border);
+}
+.td-sum-num { font-size: 1.35rem; font-weight: 900; color: var(--heading); }
+.td-sum-lbl { font-size: .7rem; color: var(--muted); font-weight: 800; margin-top: 3px; line-height: 1.25; text-transform: uppercase; letter-spacing: .04em; }
+.td-limit { font-size: .76rem; color: var(--muted); font-weight: 700; text-align: center; margin: 4px 0 10px; }
+
+.td-prog-box { margin: 4px 0 14px; }
+.td-prog-head { display: flex; justify-content: space-between; font-size: .82rem; font-weight: 800; margin-bottom: 6px; color: var(--heading); }
+.td-prog-note { font-size: .72rem; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+.duo-home-hero {
+  background: linear-gradient(135deg, var(--duo-green-light) 0%, var(--card) 65%);
+  border-color: var(--duo-green-border);
+  box-shadow: 0 4px 0 var(--duo-green-border);
+}
+html[data-theme="dark"] .duo-home-hero {
+  background: linear-gradient(135deg, rgba(88, 204, 2, .14) 0%, var(--card) 70%);
+}
+.duo-home-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.duo-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: .84rem;
+  font-weight: 900;
+  border: 2px solid var(--border);
+  background: var(--card);
+}
+.duo-stat-pill.is-due { border-color: var(--duo-red-border); background: var(--duo-red-light); color: var(--duo-red-dark); }
+.duo-stat-pill.is-new { border-color: var(--duo-blue-border); background: var(--duo-blue-light); color: var(--duo-blue-dark); }
+html[data-theme="dark"] .duo-stat-pill.is-due { color: var(--duo-red); }
+html[data-theme="dark"] .duo-stat-pill.is-new { color: var(--duo-blue); }
+
+.study-stat {
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 3px 0 var(--border);
+  padding: 14px 10px;
+}
+.study-stat-num { font-weight: 900; }
+.study-stat-label { text-transform: uppercase; letter-spacing: .05em; font-weight: 800; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   8. THẺ HỌC (FLASHCARD + REVIEW SESSION + Ô CHỮ ĐIỀN MỄ TỰ CÁCH MỜ)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fc-front, .fc-back {
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 6px 0 var(--border);
+}
+
+/* Lưới Mễ tự cách (田字格) siêu nhẹ phía sau chữ Hán lớn trên Flashcard & màn học */
+.fc-hz,
+.rv-card[data-phase="intro"] .rv-hz,
+.rv-card[data-phase="question"] .rv-hz {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: 18px;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to right, transparent calc(50% - .5px), rgba(119, 119, 119, .14) 50%, transparent calc(50% + .5px)),
+    linear-gradient(to bottom, transparent calc(50% - .5px), rgba(119, 119, 119, .14) 50%, transparent calc(50% + .5px));
+  border: 2px dashed var(--border);
+}
+.fc-hz { font-size: 3.7rem; min-width: 112px; min-height: 112px; }
+.fc-lesson-tag {
+  border-radius: 999px;
+  font-weight: 900;
+  padding: 5px 12px;
+}
+.fc-btn {
+  border-radius: 16px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.btn-ok {
+  background: var(--duo-green);
+  color: #ffffff;
+  border: 2px solid var(--duo-green);
+  box-shadow: 0 4px 0 var(--duo-green-dark);
+}
+.btn-ok:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--duo-green-dark); }
+.btn-fail {
+  background: var(--duo-red);
+  color: #ffffff;
+  border: 2px solid var(--duo-red);
+  box-shadow: 0 4px 0 var(--duo-red-dark);
+}
+.btn-fail:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--duo-red-dark); }
+html[data-theme="dark"] .btn-ok { color: #131f24; }
+
+/* ── Review Card (Màn học FSRS) ── */
+.rv-card {
+  border: 2px solid var(--border);
+  border-radius: 24px;
+  box-shadow: 0 6px 0 var(--border);
+}
+.rv-tag {
+  background: var(--duo-blue-light);
+  color: var(--duo-blue-dark);
+  border: 1.5px solid var(--duo-blue-border);
+  border-radius: 999px;
+  font-weight: 800;
+  padding: 4px 12px;
+}
+html[data-theme="dark"] .rv-tag { color: var(--duo-blue); }
+
+.rv-counter-line {
+  font-weight: 800;
+  color: var(--muted);
+}
+.rv-ct {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1.5px solid var(--border);
+}
+
+/* ── Thanh 4 nút đánh giá FSRS (Again / Hard / Good / Easy) kiểu phím 3D Duolingo ── */
+.rv-rate-btn {
+  border: 2px solid var(--border);
+  background: var(--card);
+  border-radius: 14px;
+  font-weight: 900;
+  box-shadow: 0 4px 0 var(--border);
+  transition: transform .08s ease, box-shadow .08s ease, background .15s ease;
+}
+.rv-rate-btn:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--border);
+}
+.rv-rate-again { color: var(--duo-red-dark);    border-color: var(--duo-red-border);    box-shadow: 0 4px 0 var(--duo-red-border); }
+.rv-rate-hard  { color: var(--duo-orange-dark); border-color: var(--duo-orange-border); box-shadow: 0 4px 0 var(--duo-orange-border); }
+.rv-rate-good  { color: var(--duo-green-dark);  border-color: var(--duo-green-border);  box-shadow: 0 4px 0 var(--duo-green-border); }
+.rv-rate-easy  { color: var(--duo-blue-dark);   border-color: var(--duo-blue-border);   box-shadow: 0 4px 0 var(--duo-blue-border); }
+html[data-theme="dark"] .rv-rate-again { color: var(--duo-red); }
+html[data-theme="dark"] .rv-rate-hard  { color: var(--duo-orange); }
+html[data-theme="dark"] .rv-rate-good  { color: var(--correct); }
+html[data-theme="dark"] .rv-rate-easy  { color: var(--duo-blue); }
+
+.rv-rate-btn.rv-rate-final { color: #ffffff !important; border-color: transparent; }
+.rv-rate-final.rv-rate-again { background: var(--duo-red);    box-shadow: 0 4px 0 var(--duo-red-dark); }
+.rv-rate-final.rv-rate-hard  { background: var(--duo-orange); box-shadow: 0 4px 0 var(--duo-orange-dark); }
+.rv-rate-final.rv-rate-good  { background: var(--duo-green);  box-shadow: 0 4px 0 var(--duo-green-dark); }
+.rv-rate-final.rv-rate-easy  { background: var(--duo-blue);   box-shadow: 0 4px 0 var(--duo-blue-dark); }
+html[data-theme="dark"] .rv-rate-final.rv-rate-good,
+html[data-theme="dark"] .rv-rate-final.rv-rate-easy,
+html[data-theme="dark"] .rv-rate-final.rv-rate-hard { color: #131f24 !important; }
+
+/* ── Study Workspace Toolbar (.sw-bar / .sw-seg) — sửa tương phản active ── */
+.sw-seg {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: var(--paper);
+}
+.sw-seg button.active,
+.sw-mini button.active {
+  background: var(--duo-blue);
+  color: #ffffff !important;
+}
+html[data-theme="dark"] .sw-seg button.active,
+html[data-theme="dark"] .sw-mini button.active {
+  color: #131f24 !important;
+}
+.sw-btn, .sw-ib {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 3px 0 var(--border);
+}
+.sw-btn:active, .sw-ib:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--border); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   9. TRẮC NGHIỆM, NGHE, GHÉP CẶP & GÕ CHỮ (TILES 3D DUOLINGO)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.quiz-opt, .listen-opt, .confuse-test-opt, .rv-match-btn {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  font-weight: 800;
+  color: var(--ink);
+  box-shadow: 0 4px 0 var(--border);
+  transition: transform .08s ease, box-shadow .08s ease, background .14s ease, border-color .14s ease;
+}
+.quiz-opt:not(.correct):not(.wrong):hover,
+.listen-opt:not(.correct):not(.wrong):hover,
+.confuse-test-opt:not(.correct):not(.wrong):hover,
+.rv-match-btn:hover {
+  background: var(--duo-blue-light);
+  border-color: var(--duo-blue-border);
+  color: var(--duo-blue-dark);
+  box-shadow: 0 4px 0 var(--duo-blue-border);
+}
+html[data-theme="dark"] .quiz-opt:not(.correct):not(.wrong):hover,
+html[data-theme="dark"] .listen-opt:not(.correct):not(.wrong):hover {
+  color: var(--duo-blue);
+}
+.quiz-opt:not(.correct):not(.wrong):active,
+.listen-opt:not(.correct):not(.wrong):active,
+.confuse-test-opt:not(.correct):not(.wrong):active,
+.rv-match-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--border);
+}
+.quiz-opt.correct, .listen-opt.correct, .confuse-test-opt.correct {
+  background: var(--duo-green-light);
+  border-color: var(--duo-green);
+  color: var(--duo-green-dark);
+  box-shadow: 0 4px 0 var(--duo-green);
+}
+html[data-theme="dark"] .quiz-opt.correct,
+html[data-theme="dark"] .listen-opt.correct { color: var(--correct); }
+
+.quiz-opt.wrong, .listen-opt.wrong, .confuse-test-opt.wrong {
+  background: var(--duo-red-light);
+  border-color: var(--duo-red);
+  color: var(--duo-red-dark);
+  box-shadow: 0 4px 0 var(--duo-red);
+}
+html[data-theme="dark"] .quiz-opt.wrong,
+html[data-theme="dark"] .listen-opt.wrong { color: var(--duo-red); }
+
+.quiz-type-btn {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--border);
+}
+.quiz-type-btn.active {
+  background: var(--duo-blue);
+  border-color: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 3px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .quiz-type-btn.active { color: #131f24; }
+
+body.sw-on .rv-card .listen-play {
+  background: var(--duo-blue);
+  border: 2px solid var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 6px 0 var(--duo-blue-dark);
+}
+body.sw-on .rv-card .listen-play:active {
+  transform: translateY(4px);
+  box-shadow: 0 2px 0 var(--duo-blue-dark);
+}
+
+.type-feedback.ok {
+  background: var(--duo-green-light);
+  color: var(--duo-green-dark);
+  border: 2px solid var(--duo-green-border);
+}
+.type-feedback.bad {
+  background: var(--duo-red-light);
+  color: var(--duo-red-dark);
+  border: 2px solid var(--duo-red-border);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   10. THỐNG KÊ, NĂNG LỰC, TỪ ĐIỂN & HỘI THOẠI (DUOLINGO STORIES STYLE)
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dash-kpi {
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 4px 0 var(--border);
+  padding: 14px 10px;
+}
+.dash-kpi-num { color: var(--heading); font-weight: 900; font-size: 1.4rem; }
+.dash-kpi-lbl { text-transform: uppercase; letter-spacing: .05em; font-weight: 800; color: var(--muted); }
+
+.dash-chip {
+  border: 2px solid var(--border);
+  background: var(--card);
+  color: var(--ink-2);
+  border-radius: 14px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--border);
+}
+.dash-chip.sel {
+  background: var(--duo-blue);
+  border-color: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 3px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .dash-chip.sel { color: #131f24; }
+
+.dash-bar-track { background: var(--border); border-radius: 999px; overflow: hidden; }
+.dash-bar-fill { border-radius: 999px; }
+.dash-heat-cell { border-radius: 4px; }
+
+.sk-cell {
+  background: var(--card) !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 0 var(--border);
+}
+
+/* Hội thoại kiểu Duolingo Stories */
+.cv-card, .cv-row, .cv-stat {
+  border: 2px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 4px 0 var(--border);
+}
+.cv-card:hover {
+  border-color: var(--duo-blue-border);
+  box-shadow: 0 4px 0 var(--duo-blue-border);
+}
+.cv-btn {
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--border);
+}
+.cv-btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--border); }
+.cv-btn-primary {
+  background: var(--duo-green);
+  border-color: var(--duo-green);
+  color: #ffffff;
+  box-shadow: 0 4px 0 var(--duo-green-dark);
+}
+.cv-btn-primary:hover:not(:disabled) { background: #61e002; border-color: #61e002; }
+html[data-theme="dark"] .cv-btn-primary { color: #131f24; }
+
+.cv-seg-btn {
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--border);
+}
+.cv-seg-btn.is-on {
+  background: var(--duo-blue);
+  border-color: var(--duo-blue);
+  color: #ffffff;
+  box-shadow: 0 3px 0 var(--duo-blue-dark);
+}
+html[data-theme="dark"] .cv-seg-btn.is-on { color: #131f24; }
+
+.cv-bubble {
+  border: 2px solid var(--border);
+  border-radius: 18px 18px 18px 6px;
+  box-shadow: 0 3px 0 var(--border);
+}
+.cv-side-b .cv-bubble {
+  border-radius: 18px 18px 6px 18px;
+  background: var(--duo-blue-light);
+  border-color: var(--duo-blue-border);
+  box-shadow: 0 3px 0 var(--duo-blue-border);
+}
+.cv-avatar {
+  border-radius: 50%;
+  border: 2px solid var(--duo-green-border);
+  background: var(--duo-green-light);
+  color: var(--duo-green-dark);
+  font-weight: 900;
+}
+.cv-side-b .cv-avatar {
+  border-color: var(--duo-orange-border);
+  background: var(--duo-orange-light);
+  color: var(--duo-orange-dark);
+}
+.cv-situation {
+  background: var(--duo-gold-light);
+  border: 2px solid var(--duo-orange-border);
+  border-left: 5px solid var(--duo-orange);
+  border-radius: 16px;
+}
+.cv-situation-k { color: var(--duo-orange-dark); }
+.cv-play {
+  border: 2px solid var(--duo-blue-border);
+  border-radius: 12px;
+  background: var(--duo-blue-light);
+  color: var(--duo-blue-dark);
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--duo-blue-border);
+}
+html[data-theme="dark"] .cv-play { color: var(--duo-blue); }
+.cv-dock {
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .14), 0 4px 0 var(--border);
+}
+.cv-dock-main { border-radius: 999px; }
+.cv-iconbtn {
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  box-shadow: 0 3px 0 var(--border);
+}
+
+/* ── Bảng & chống tràn trên điện thoại ── */
+#content table { border-collapse: collapse; width: 100%; font-size: .84rem; }
+#content table th {
+  text-align: left;
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  font-weight: 900;
+  padding: 10px;
+  border-bottom: 2px solid var(--border);
+  background: var(--paper);
+  white-space: nowrap;
+}
+#content table td { padding: 10px; border-bottom: 1.5px solid var(--border); vertical-align: middle; }
+#content table tr:hover td { background: var(--duo-blue-light); }
+@media (max-width: 640px) { #content table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; } }
+#content input:not([type=checkbox]):not([type=radio]):not([type=range]), #content select, #content textarea { max-width: 100%; box-sizing: border-box; }
+@media (max-width: 767px) { #content, #content .panel, #content details { max-width: 100%; min-width: 0; } #content .panel, #content details { overflow-x: auto; } }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
