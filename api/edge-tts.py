@@ -1,7 +1,8 @@
 """Edge-TTS serverless endpoint for HSK-main.
 
 Vercel route: /api/edge-tts (rewritten from /api/tts).
-Only two mainland Mandarin voices are accepted. No text/audio is logged or persisted.
+Only whitelisted Mandarin voices (plus Vietnamese for hands-free podcast mode)
+are accepted. No text/audio is logged or persisted.
 """
 import asyncio
 import inspect
@@ -21,6 +22,7 @@ PATHS = {"/api/edge-tts", "/api/tts"}
 VOICES = {
     "zh-CN-XiaoxiaoNeural",
     "zh-CN-YunxiNeural",
+    "vi-VN-HoaiMyNeural",  # Nghe rảnh tay (Podcast): đọc nghĩa tiếng Việt qua <audio> khi tắt màn hình
 }
 RATES = {"0.8": "-20%", "0.9": "-10%", "1.0": "+0%", "1.1": "+10%", "1.2": "+20%"}
 MAX_CHARS = 500

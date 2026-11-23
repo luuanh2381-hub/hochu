@@ -20,6 +20,12 @@ class EdgeTtsApiTests(unittest.TestCase):
             self.assertIsNone(error)
             self.assertEqual(args["voice"], voice)
 
+    def test_accepts_vietnamese_podcast_voice(self):
+        args, error = mod.validate({"text": "xin chào", "voice": "vi-VN-HoaiMyNeural", "rate": "1.0"})
+        self.assertIsNone(error)
+        self.assertEqual(args["voice"], "vi-VN-HoaiMyNeural")
+        self.assertEqual(args["rate"], "+0%")
+
     def test_rejects_taiwan_voice(self):
         args, error = mod.validate({"text": "你好。", "voice": "zh-TW-HsiaoChenNeural"})
         self.assertIsNone(args)

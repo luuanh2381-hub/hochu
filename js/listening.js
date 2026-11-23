@@ -4,14 +4,16 @@
 'use strict';
 
 let ls2Items = [], ls2Idx = 0, ls2Revealed = false, ls2Plays = 0, ls2Clear = 0, ls2DbExamples = [], ls2DbScopeKey = '';
-// Chế độ Nghe rảnh tay (Podcast ôn từ sắp quên / theo bài / câu ví dụ) — không đổi lịch FSRS
+// Chế độ Nghe rảnh tay (Podcast ôn từ sắp quên / theo bài / câu ví dụ / hội thoại) — không đổi lịch FSRS
 let ls2TabMode = 'active'; // 'active' | 'podcast'
-let podSource = 'atrisk';  // 'atrisk' | 'lesson' | 'sentences'
+let podSource = 'atrisk';  // 'atrisk' | 'lesson' | 'sentences' | 'convo'
 let podItems = [], podIdx = 0, podPlaying = false, podRunId = 0;
 let podPauseSec = 2.5, podSlow = true, podRepeat2 = true, podReadVi = true, podHideText = false;
-let podSleepMin = 0, podSleepEndAt = 0, podSleepTimer = null, podWakeLock = null;
+let podSleepMin = 0, podSleepEndAt = 0, podSleepTimer = null, podWakeLock = null, podCancelWait = null;
 let podPhase = 'idle'; // 'idle' | 'zh1' | 'wait' | 'reveal' | 'zh2'
 let podSourceNote = '';
+let podConvoList = [], podConvoFilter = 'all', podConvoId = '', podConvoTargetId = '';
+let podActiveConvo = null, podConvoAutoNext = true, podConvoError = '';
 
 function ls2ScopeKey() {
   if (typeof lessonsAllMode !== 'undefined' && typeof selectedBookIds !== 'undefined') {
@@ -78,7 +80,7 @@ function renderListening() {
     return `<div class="panel">
       ${modeBar}
       <div class="panel-title">📻 Nghe rảnh tay · Podcast ôn từ</div>
-      <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Tự động phát lần lượt tiếng Trung → khoảng nghỉ cho não tự nhớ → hiện &amp; đọc nghĩa tiếng Việt → lặp lại. Phù hợp lúc đi đường, thư giãn hoặc trước khi ngủ. Luyện bổ sung, không đổi lịch FSRS.</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Tự động phát lần lượt tiếng Trung → khoảng nghỉ cho não tự nhớ → hiện &amp; đọc nghĩa tiếng Việt → lặp lại. Hỗ trợ phát nền khi tắt màn hình và điều khiển trên màn hình khóa / tai nghe Bluetooth. Luyện bổ sung, không đổi lịch FSRS.</div>
       <div id="pod-body"></div>
     </div>`;
   }
@@ -97,10 +99,21 @@ function ls2SwitchMode(mode) {
   if (typeof render === 'function') render();
 }
 
-function openHandsFreePodcast(src) {
+function openHandsFreePodcast(src, opts) {
+  const prevSrc = podSource;
+  const targetId = opts && opts.dialogueId ? String(opts.dialogueId) : '';
   if (src) podSource = src;
+  if (targetId) podConvoTargetId = targetId;
+  if ((src && src !== prevSrc) || (targetId && targetId !== podConvoId)) {
+    podStop();
+    podItems = [];
+  }
   ls2TabMode = 'podcast';
   if (typeof goTab === 'function') goTab('listening');
+}
+
+function openHandsFreeConvo(dialogueId) {
+  openHandsFreePodcast('convo', dialogueId ? { dialogueId } : null);
 }
 
 function bindListening() {
@@ -223,18 +236,221 @@ function podEscape(s) {
   return typeof escapeHtml === 'function' ? escapeHtml(s) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-async function podLoadSource(src) {
+function podFilteredConvos() {
+  const list = Array.isArray(podConvoList) ? podConvoList : [];
+  if (podConvoFilter === 'fav') return list.filter(c => c && c.progress && c.progress.is_favorited);
+  if (podConvoFilter === 'HSK 3' || podConvoFilter === 'HSK 4') return list.filter(c => c && c.hsk_level === podConvoFilter);
+  return list;
+}
+
+async function podFetchConvoList(force) {
+  if (!force && podConvoList.length) return { list: podConvoList, error: null };
+  if (typeof loadConversations === 'function') {
+    const res = await loadConversations({});
+    if (!res.error && Array.isArray(res.list)) {
+      podConvoList = res.list;
+      return { list: podConvoList, error: null };
+    }
+    return { list: [], error: res.error || 'Không tải được danh sách hội thoại' };
+  }
+  if (typeof authHeaders !== 'function' || typeof fetch !== 'function') {
+    return { list: [], error: 'Bạn cần đăng nhập để nghe thư viện hội thoại.' };
+  }
+  try {
+    const r = await fetch('/api/conversations', { headers: authHeaders() });
+    const d = await r.json().catch(() => null);
+    if (r.ok && d && d.ok && Array.isArray(d.conversations)) {
+      podConvoList = d.conversations;
+      return { list: podConvoList, error: null };
+    }
+    return { list: [], error: (d && d.error) || 'Không tải được danh sách hội thoại' };
+  } catch {
+    return { list: [], error: 'Lỗi kết nối khi tải danh sách hội thoại' };
+  }
+}
+
+async function podFetchConvoDetail(dialogueId) {
+  if (!dialogueId) return { convo: null, error: 'Chưa chọn bài hội thoại' };
+  if (typeof currentConvo !== 'undefined' && currentConvo && currentConvo.dialogue_id === dialogueId
+      && Array.isArray(currentConvo.turns) && currentConvo.turns.length) {
+    return { convo: currentConvo, error: null };
+  }
+  if (typeof loadConversation === 'function') return await loadConversation(dialogueId);
+  if (typeof authHeaders !== 'function' || typeof fetch !== 'function') {
+    return { convo: null, error: 'Bạn cần đăng nhập để nghe thư viện hội thoại.' };
+  }
+  try {
+    const r = await fetch('/api/conversations/' + encodeURIComponent(dialogueId), { headers: authHeaders() });
+    const d = await r.json().catch(() => null);
+    if (r.ok && d && d.ok && d.conversation) return { convo: d.conversation, error: null };
+    return { convo: null, error: (d && d.error) || 'Không tải được hội thoại' };
+  } catch {
+    return { convo: null, error: 'Lỗi kết nối khi tải hội thoại' };
+  }
+}
+
+function podTurnsFromConvo(convo) {
+  const turns = (convo && Array.isArray(convo.turns)) ? convo.turns : [];
+  const names = [];
+  for (const t of turns) if (t && t.character && !names.includes(t.character)) names.push(t.character);
+  const convoTitle = `${convo.title_zh || ''}${convo.title_vi ? ' · ' + convo.title_vi : ''}`;
+  return turns.map((t, i) => {
+    const side = names.indexOf(t.character) === 1 ? 1 : 0;
+    const customVoice = (typeof convoVoices !== 'undefined' && convo.id != null)
+      ? convoVoices[`${convo.id}:${i}`]
+      : null;
+    // Phân giọng Nam/Nữ tự động cho 2 nhân vật để dễ phân biệt khi nghe nhắm mắt / tắt màn hình
+    const voice = customVoice || (side === 1 ? 'zh-CN-YunxiNeural' : 'zh-CN-XiaoxiaoNeural');
+    return {
+      hz: String(t.chinese_text || '').trim(),
+      py: t.pinyin || '',
+      vi: t.vietnamese_text || '',
+      hanviet: '',
+      speaker: t.character || '',
+      voice,
+      turnIndex: i,
+      tag: `${convo.hsk_level || 'Hội thoại'} · ${t.character || ('Lượt ' + (i + 1))}`,
+      convoId: convo.id,
+      dialogueId: convo.dialogue_id,
+      convoTitle,
+    };
+  }).filter(x => x.hz);
+}
+
+async function podLoadConvoIntoItems(dialogueId) {
+  podConvoError = '';
+  const { convo, error } = await podFetchConvoDetail(dialogueId);
+  if (!convo) {
+    podActiveConvo = null;
+    podItems = [];
+    podConvoError = error || 'Không tải được nội dung hội thoại.';
+    return false;
+  }
+  const items = podTurnsFromConvo(convo);
+  if (!items.length) {
+    podActiveConvo = convo;
+    podConvoId = convo.dialogue_id || dialogueId;
+    podItems = [];
+    podConvoError = 'Bài hội thoại này chưa có lượt thoại.';
+    return false;
+  }
+  podActiveConvo = convo;
+  podConvoId = convo.dialogue_id || dialogueId;
+  podItems = items;
+  podIdx = 0;
+  podSourceNote = `${convo.hsk_level ? convo.hsk_level + ' · ' : ''}${convo.title_zh || ''}${convo.title_vi ? ' — ' + convo.title_vi : ''}`;
+  return true;
+}
+
+async function podSelectConvo(dialogueId) {
+  if (!dialogueId) return;
+  const wasPlaying = podPlaying;
+  const prevSleepEndAt = podSleepEndAt;
+  podPause();
+  podConvoTargetId = dialogueId;
+  const body = document.getElementById('pod-body');
+  if (body) body.innerHTML = '<div class="study-empty">⏳ Đang tải bài hội thoại...</div>';
+  const ok = await podLoadConvoIntoItems(dialogueId);
+  podRender();
+  if (ok && wasPlaying) {
+    podSleepEndAt = prevSleepEndAt;
+    podStart(true);
+  }
+}
+
+async function podSetConvoFilter(filter) {
+  podConvoFilter = filter || 'all';
+  const filtered = podFilteredConvos();
+  if (!filtered.length) {
+    podStop();
+    podItems = [];
+    podActiveConvo = null;
+    podConvoError = podConvoFilter === 'fav' ? 'Bạn chưa đánh dấu hội thoại yêu thích nào.' : 'Không có hội thoại nào trong mục lọc này.';
+    podRender();
+    return;
+  }
+  if (!filtered.some(c => c.dialogue_id === podConvoId)) {
+    await podSelectConvo(filtered[0].dialogue_id);
+  } else {
+    podRender();
+  }
+}
+
+async function podAdvanceConvo(runId) {
+  if (podActiveConvo && typeof convoMarkProgress === 'function') {
+    try { convoMarkProgress(podActiveConvo, podItems.length, true); } catch {}
+  }
+  if (!podConvoAutoNext) {
+    podIdx = 0;
+    return true;
+  }
+  const filtered = podFilteredConvos();
+  if (filtered.length <= 1) {
+    podIdx = 0;
+    return true;
+  }
+  const curPos = filtered.findIndex(c => c.dialogue_id === podConvoId);
+  const nextMeta = filtered[(curPos + 1 + filtered.length) % filtered.length];
+  if (!nextMeta || !nextMeta.dialogue_id || nextMeta.dialogue_id === podConvoId) {
+    podIdx = 0;
+    return true;
+  }
+  // Giữ phiên audio nền liên tục trong lúc tải bài hội thoại kế tiếp
+  if (typeof ttsStartHoldSilence === 'function') ttsStartHoldSilence();
+  const ok = await podLoadConvoIntoItems(nextMeta.dialogue_id);
+  if (runId !== podRunId || !podPlaying) return false;
+  if (!ok) {
+    podIdx = 0;
+    return podItems.length > 0;
+  }
+  await podSleep(900, runId);
+  return runId === podRunId && podPlaying;
+}
+
+async function podLoadSource(src, dialogueId) {
   if (src) podSource = src;
+  if (dialogueId) podConvoTargetId = String(dialogueId);
   podStop();
   podItems = [];
   podIdx = 0;
   podSourceNote = '';
+  podConvoError = '';
   const body = document.getElementById('pod-body');
   if (body) body.innerHTML = '<div class="study-empty">⏳ Đang chuẩn bị danh sách phát...</div>';
 
   const allWords = (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) ? WORDS : [];
   const wordByHz = new Map();
   for (const w of allWords) if (w && w.hz && !wordByHz.has(w.hz)) wordByHz.set(w.hz, w);
+
+  if (podSource === 'convo') {
+    const { list, error } = await podFetchConvoList(false);
+    if (error && !list.length) {
+      podConvoError = error;
+      podRender();
+      return;
+    }
+    const filtered = podFilteredConvos();
+    let pickId = podConvoTargetId;
+    podConvoTargetId = '';
+    if (pickId && !filtered.some(c => c.dialogue_id === pickId)) {
+      // Nếu bài được chọn nằm ngoài bộ lọc hiện tại → mở rộng về 'all'
+      if (list.some(c => c.dialogue_id === pickId)) podConvoFilter = 'all';
+    }
+    const activeList = podFilteredConvos();
+    if (!pickId) {
+      if (podConvoId && activeList.some(c => c.dialogue_id === podConvoId)) pickId = podConvoId;
+      else if (typeof currentConvo !== 'undefined' && currentConvo && currentConvo.dialogue_id && activeList.some(c => c.dialogue_id === currentConvo.dialogue_id)) pickId = currentConvo.dialogue_id;
+      else if (activeList.length) pickId = activeList[0].dialogue_id;
+    }
+    if (!pickId) {
+      podConvoError = podConvoFilter === 'fav' ? 'Bạn chưa đánh dấu hội thoại yêu thích nào.' : 'Chưa có bài hội thoại nào sẵn sàng.';
+      podRender();
+      return;
+    }
+    await podLoadConvoIntoItems(pickId);
+    podRender();
+    return;
+  }
 
   if (podSource === 'atrisk') {
     const picked = [], seen = new Set();
@@ -289,6 +505,82 @@ function podInit() {
   else podRender();
 }
 
+function podCleanViText(text) {
+  return String(text || '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().slice(0, 180);
+}
+
+function podMediaSessionAvailable() {
+  return typeof navigator !== 'undefined' && navigator && 'mediaSession' in navigator && navigator.mediaSession;
+}
+
+function podBindMediaSession() {
+  if (!podMediaSessionAvailable()) return;
+  const ms = navigator.mediaSession;
+  const set = (action, fn) => { try { ms.setActionHandler(action, fn); } catch {} };
+  set('play', () => { if (!podPlaying && podItems.length) podStart(); });
+  set('pause', () => { if (podPlaying) podPause(); });
+  set('stop', () => podStop());
+  set('previoustrack', () => podJump(-1));
+  set('nexttrack', () => podJump(1));
+}
+
+function podClearMediaSession() {
+  if (!podMediaSessionAvailable()) return;
+  const ms = navigator.mediaSession;
+  for (const action of ['play', 'pause', 'stop', 'previoustrack', 'nexttrack']) {
+    try { ms.setActionHandler(action, null); } catch {}
+  }
+  try { ms.playbackState = 'none'; } catch {}
+}
+
+function podUpdateMediaSession(item, showAnswer) {
+  if (!podMediaSessionAvailable() || !item) return;
+  const ms = navigator.mediaSession;
+  try {
+    if (typeof MediaMetadata === 'function') {
+      const origin = (typeof location !== 'undefined' && location && location.origin && location.origin !== 'null') ? location.origin : '';
+      const speakerPrefix = item.speaker ? `${item.speaker}: ` : '';
+      const title = (podHideText && !showAnswer)
+        ? (item.speaker ? `🎧 ${item.speaker} đang nói…` : '🎧 Nghe & tự nhẩm nghĩa…')
+        : (speakerPrefix + item.hz + (!item.speaker && item.py ? ' · ' + item.py : ''));
+      const fallbackArtist = item.convoTitle || 'Nghe rảnh tay';
+      const artist = showAnswer
+        ? (item.vi || fallbackArtist)
+        : (podHideText ? fallbackArtist : (item.vi || fallbackArtist));
+      const album = item.convoTitle
+        ? `${item.convoTitle} (${podIdx + 1}/${podItems.length})`
+        : `Nghe rảnh tay (${podIdx + 1}/${podItems.length}) · 学中文`;
+      ms.metadata = new MediaMetadata({
+        title,
+        artist,
+        album,
+        artwork: [{ src: origin + '/icons/app-icon.svg', sizes: '512x512', type: 'image/svg+xml' }],
+      });
+    }
+    ms.playbackState = podPlaying ? 'playing' : 'paused';
+  } catch {}
+}
+
+function podPrefetchItem(item) {
+  if (!item || typeof ttsPrefetch !== 'function') return;
+  const zh = typeof ttsResolve === 'function' ? ttsResolve(item.hz) : item.hz;
+  const zhVoice = item.voice || (typeof edgeTtsVoice !== 'undefined' ? edgeTtsVoice : 'zh-CN-XiaoxiaoNeural');
+  const normRate = typeof ttsRate !== 'undefined' ? (Math.round(ttsRate * 10) / 10).toFixed(1) : '0.9';
+  const firstRate = podSlow ? '0.8' : normRate;
+  const split = (typeof TT !== 'undefined' && TT.splitSpeech) ? TT.splitSpeech : (t => [t]);
+  if (zh) {
+    for (const chunk of split(String(zh).trim(), (typeof TT !== 'undefined' && TT.DEFAULT_MAX) || 480)) {
+      ttsPrefetch(chunk, zhVoice, firstRate);
+      if (podRepeat2 && firstRate !== normRate) ttsPrefetch(chunk, zhVoice, normRate);
+    }
+  }
+  if (podReadVi && item.vi) {
+    const vi = podCleanViText(item.vi);
+    const viVoice = typeof EDGE_TTS_VI_VOICE !== 'undefined' ? EDGE_TTS_VI_VOICE : 'vi-VN-HoaiMyNeural';
+    if (vi) ttsPrefetch(vi, viVoice, '1.0');
+  }
+}
+
 async function podAcquireWakeLock() {
   try {
     if ('wakeLock' in navigator && !podWakeLock) {
@@ -308,127 +600,219 @@ function podSetSleep(min) {
   if (podSleepMin > 0 && podPlaying) podArmSleepTimer();
   podRender();
 }
-function podArmSleepTimer() {
-  if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
-  if (podSleepMin <= 0) { podSleepEndAt = 0; return; }
-  podSleepEndAt = Date.now() + podSleepMin * 60000;
-  podSleepTimer = setTimeout(() => {
+function podCheckSleepExpired() {
+  if (podSleepEndAt > 0 && Date.now() >= podSleepEndAt) {
+    const mins = podSleepMin;
     podStop();
     const st = document.getElementById('pod-phase');
-    if (st) st.textContent = `🌙 Đã hết hẹn giờ ${podSleepMin} phút — tự động dừng.`;
-  }, podSleepMin * 60000);
+    if (st) st.textContent = `🌙 Đã hết hẹn giờ ${mins} phút — tự động dừng.`;
+    return true;
+  }
+  return false;
+}
+function podArmSleepTimer(existingEndAt) {
+  if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
+  if (podSleepMin <= 0) { podSleepEndAt = 0; return; }
+  podSleepEndAt = (existingEndAt && existingEndAt > Date.now()) ? existingEndAt : (Date.now() + podSleepMin * 60000);
+  const remainMs = Math.max(200, podSleepEndAt - Date.now());
+  podSleepTimer = setTimeout(() => {
+    podCheckSleepExpired();
+  }, remainMs);
 }
 
-function podStop() {
+// Tạm dừng: giữ MediaSession ở trạng thái 'paused' để người học bấm Phát lại ngay trên màn hình khoá / tai nghe Bluetooth.
+function podPause() {
   podRunId++;
   podPlaying = false;
   podPhase = 'idle';
   if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
-  podSleepEndAt = 0;
+  if (podCancelWait) { const c = podCancelWait; podCancelWait = null; try { c(); } catch {} }
   podReleaseWakeLock();
   if (typeof ttsStop === 'function') { try { ttsStop(); } catch {} }
-  if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch {} }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch {} }
+  if (podMediaSessionAvailable()) {
+    try { navigator.mediaSession.playbackState = 'paused'; } catch {}
+  }
   podUpdatePlayUi();
 }
 
-function podSleep(ms, runId) {
+// Dừng hẳn (chuyển tab / đổi nguồn / hết giờ hẹn tắt): xoá luôn điều khiển màn hình khoá.
+function podStop() {
+  podPause();
+  podSleepEndAt = 0;
+  podClearMediaSession();
+}
+
+async function podSleep(ms, runId) {
+  if (runId !== podRunId) return false;
+  const dur = Math.max(0, Math.round(Number(ms) || 0));
+  if (dur <= 0) return runId === podRunId;
+  if (typeof ttsPlaySilence === 'function') {
+    const ok = await ttsPlaySilence(dur);
+    return ok && runId === podRunId;
+  }
   return new Promise((resolve) => {
-    if (runId !== podRunId) return resolve(false);
-    const t = setTimeout(() => resolve(runId === podRunId), ms);
-    const iv = setInterval(() => {
-      if (runId !== podRunId) { clearTimeout(t); clearInterval(iv); resolve(false); }
-    }, 150);
-    setTimeout(() => clearInterval(iv), ms + 200);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      if (podCancelWait === finish) podCancelWait = null;
+      resolve(runId === podRunId);
+    };
+    podCancelWait = finish;
+    const t = setTimeout(finish, dur);
   });
 }
 
-function podSpeakZh(text, slow, runId) {
+function podSpeakZh(text, slow, runId, voice) {
   return new Promise((resolve) => {
     if (runId !== podRunId) return resolve(false);
     let done = false;
-    const finish = () => { if (!done) { done = true; resolve(runId === podRunId); } };
-    const safety = setTimeout(finish, 12000);
-    const hooks = { end: () => { clearTimeout(safety); finish(); }, error: () => { clearTimeout(safety); finish(); } };
-    if (slow && typeof speakSlow === 'function') speakSlow(text, hooks);
-    else if (typeof speak === 'function') speak(text, hooks);
-    else { clearTimeout(safety); finish(); }
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(safety);
+      if (podCancelWait === finish) podCancelWait = null;
+      resolve(runId === podRunId);
+    };
+    podCancelWait = finish;
+    const safetyMs = Math.max(15000, String(text || '').length * 600);
+    const safety = setTimeout(finish, safetyMs);
+    const hooks = { end: finish, error: finish };
+    const opts = voice ? { keepAlive: true, voice } : { keepAlive: true };
+    if (slow && typeof speakSlow === 'function') speakSlow(text, hooks, opts);
+    else if (typeof speak === 'function') speak(text, hooks, opts);
+    else finish();
   });
 }
 
 function podSpeakVi(text, runId) {
   return new Promise((resolve) => {
-    if (!podReadVi || !text || runId !== podRunId || !('speechSynthesis' in window)) return resolve(runId === podRunId);
+    if (!podReadVi || !text || runId !== podRunId) return resolve(runId === podRunId);
+    const clean = podCleanViText(text);
+    if (!clean) return resolve(runId === podRunId);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(safety);
+      if (podCancelWait === finish) podCancelWait = null;
+      resolve(runId === podRunId);
+    };
+    podCancelWait = finish;
+    const safetyMs = Math.max(12000, clean.length * 250);
+    const safety = setTimeout(finish, safetyMs);
+    const hooks = { end: finish, error: finish };
+    if (typeof speakVi === 'function') {
+      speakVi(clean, hooks, { keepAlive: true });
+      return;
+    }
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      finish();
+      return;
+    }
     try {
       speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(String(text).replace(/\([^)]*\)/g, '').slice(0, 120));
+      const u = new SpeechSynthesisUtterance(clean);
       u.lang = 'vi-VN';
       const viVoice = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith('vi'));
       if (viVoice) u.voice = viVoice;
       u.rate = 1.0;
-      let done = false;
-      const finish = () => { if (!done) { done = true; resolve(runId === podRunId); } };
-      const safety = setTimeout(finish, 7000);
-      u.onend = () => { clearTimeout(safety); finish(); };
-      u.onerror = () => { clearTimeout(safety); finish(); };
+      u.onend = finish;
+      u.onerror = finish;
       speechSynthesis.speak(u);
-    } catch { resolve(runId === podRunId); }
+    } catch { finish(); }
   });
+}
+
+function podStart(keepSleepEndAt) {
+  if (!podItems.length) return;
+  if (typeof ttsUnlock === 'function') ttsUnlock();
+  podPlaying = true;
+  podAcquireWakeLock();
+  podBindMediaSession();
+  if (podSleepMin > 0) podArmSleepTimer(keepSleepEndAt ? podSleepEndAt : 0);
+  if (typeof markDailySealFlag === 'function') markDailySealFlag('listening');
+  podLoop(++podRunId);
 }
 
 function podTogglePlay() {
   if (!podItems.length) return;
-  if (podPlaying) { podStop(); return; }
-  podPlaying = true;
-  podAcquireWakeLock();
-  if (podSleepMin > 0) podArmSleepTimer();
-  if (typeof markDailySealFlag === 'function') markDailySealFlag('listening');
-  podLoop(++podRunId);
+  if (podPlaying) { podPause(); return; }
+  podStart(false);
 }
 
 function podJump(delta) {
   if (!podItems.length) return;
   const wasPlaying = podPlaying;
-  podStop();
+  const prevSleepEndAt = podSleepEndAt;
+  podPause();
   podIdx = (podIdx + delta + podItems.length) % podItems.length;
   podRender();
-  if (wasPlaying) podTogglePlay();
+  if (podItems[podIdx]) podUpdateMediaSession(podItems[podIdx], !wasPlaying);
+  if (wasPlaying) {
+    podSleepEndAt = prevSleepEndAt;
+    podStart(true);
+  }
 }
 
 async function podLoop(runId) {
   while (runId === podRunId && podPlaying && podItems.length) {
     if (typeof currentTab !== 'undefined' && currentTab !== 'listening') { podStop(); return; }
+    if (podCheckSleepExpired()) return;
     const item = podItems[podIdx];
     if (!item) break;
 
+    // Tải trước toàn bộ đoạn của mục hiện tại + mục kế tiếp để chuyển đoạn 0 ms ngay cả khi khoá màn hình.
+    podPrefetchItem(item);
+    if (podItems.length > 1) podPrefetchItem(podItems[(podIdx + 1) % podItems.length]);
+
     podPhase = 'zh1';
     podRender();
-    if (!(await podSpeakZh(item.hz, podSlow, runId))) break;
+    podUpdateMediaSession(item, false);
+    if (!(await podSpeakZh(item.hz, podSlow, runId, item.voice))) break;
+    if (podCheckSleepExpired()) return;
 
-    podPhase = 'wait';
-    podUpdatePhaseUi(`🤔 Tự nhẩm nghĩa trong ${podPauseSec} giây...`, false);
-    if (!(await podSleep(Math.round(podPauseSec * 1000), runId))) break;
+    if (podPauseSec > 0) {
+      podPhase = 'wait';
+      podUpdatePhaseUi(`🤔 Tự nhẩm nghĩa trong ${podPauseSec} giây...`, false);
+      if (!(await podSleep(Math.round(podPauseSec * 1000), runId))) break;
+      if (podCheckSleepExpired()) return;
+    }
 
     podPhase = 'reveal';
-    podUpdatePhaseUi('📖 Đáp án & nghĩa tiếng Việt', true);
+    podUpdatePhaseUi(podReadVi ? '📖 Đáp án & nghĩa tiếng Việt' : '📖 Nội dung & nghĩa tiếng Việt', true);
+    podUpdateMediaSession(item, true);
     if (podReadVi && item.vi) {
       if (!(await podSpeakVi(item.vi, runId))) break;
-    } else {
+    } else if (podSource !== 'convo') {
       if (!(await podSleep(1500, runId))) break;
     }
+    if (podCheckSleepExpired()) return;
 
     if (podRepeat2) {
       podPhase = 'zh2';
       podUpdatePhaseUi('🔁 Nhắc lại tiếng Trung', true);
-      if (!(await podSpeakZh(item.hz, false, runId))) break;
+      if (!(await podSpeakZh(item.hz, false, runId, item.voice))) break;
+      if (podCheckSleepExpired()) return;
     }
-    if (!(await podSleep(850, runId))) break;
+    const betweenMs = (podSource === 'convo' && !podReadVi && !podRepeat2) ? 450 : 850;
+    if (!(await podSleep(betweenMs, runId))) break;
 
-    podIdx = (podIdx + 1) % podItems.length;
+    if (podSource === 'convo' && podIdx >= podItems.length - 1) {
+      if (!(await podAdvanceConvo(runId))) break;
+    } else {
+      podIdx = (podIdx + 1) % podItems.length;
+    }
   }
   if (runId === podRunId) {
     podPlaying = false;
     podPhase = 'idle';
     podReleaseWakeLock();
+    if (podMediaSessionAvailable()) {
+      try { navigator.mediaSession.playbackState = 'paused'; } catch {}
+    }
     podUpdatePlayUi();
   }
 }
@@ -447,6 +831,30 @@ function podUpdatePhaseUi(label, showAnswer) {
   if (ans) ans.style.opacity = showAnswer ? '1' : '0.12';
 }
 
+function podRenderConvoPicker() {
+  if (podSource !== 'convo') return '';
+  const filters = [
+    ['all', 'Tất cả'],
+    ['HSK 3', 'HSK 3'],
+    ['HSK 4', 'HSK 4'],
+    ['fav', '★ Yêu thích'],
+  ].map(([id, lbl]) => `<button type="button" class="dash-chip${podConvoFilter === id ? ' sel' : ''}" onclick="podSetConvoFilter('${id}')" style="font-size:.76rem;padding:4px 10px">${lbl}</button>`).join('');
+  const filtered = podFilteredConvos();
+  const options = filtered.map(c => {
+    const lv = c.hsk_level ? `[${c.hsk_level}] ` : '';
+    const title = `${lv}${c.title_zh || ''}${c.title_vi ? ' — ' + c.title_vi : ''}${c.total_turns ? ` (${c.total_turns} lượt)` : ''}`;
+    return `<option value="${podEscape(c.dialogue_id)}"${c.dialogue_id === podConvoId ? ' selected' : ''}>${podEscape(title)}</option>`;
+  }).join('');
+  return `<div style="margin-bottom:10px;padding:10px;border:1px solid var(--line,#e5dfd3);border-radius:12px;background:var(--surface-2,rgba(0,0,0,.02))">
+    <div class="dash-filter-row" style="margin-bottom:8px;justify-content:center">${filters}</div>
+    ${filtered.length ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center">
+      <select aria-label="Chọn bài hội thoại" onchange="podSelectConvo(this.value)" style="max-width:100%;flex:1;min-width:200px;padding:7px 10px;border-radius:8px;border:1px solid var(--line,#d8d1c5);background:var(--card,#fff);color:var(--ink,#222);font-size:.82rem">${options}</select>
+      <label class="gf-pod-chk" style="margin:0;white-space:nowrap"><input type="checkbox" ${podConvoAutoNext ? 'checked' : ''} onchange="podConvoAutoNext=this.checked"> ⏭ Tự chuyển bài tiếp</label>
+    </div>` : ''}
+    ${podActiveConvo && podActiveConvo.situation ? `<div style="font-size:.74rem;color:var(--muted);margin-top:6px;text-align:center">💬 ${podEscape(podActiveConvo.situation)}</div>` : ''}
+  </div>`;
+}
+
 function podRender() {
   const body = document.getElementById('pod-body');
   if (!body) return;
@@ -454,25 +862,33 @@ function podRender() {
     ['atrisk', '⚠️ Từ sắp quên'],
     ['lesson', '📚 Từ bài đang chọn'],
     ['sentences', '💬 Câu ví dụ'],
+    ['convo', '🗣️ Hội thoại'],
   ].map(([id, lbl]) => `<button type="button" class="dash-chip${podSource === id ? ' sel' : ''}" onclick="podLoadSource('${id}')">${lbl}</button>`).join('');
+  const convoPicker = podRenderConvoPicker();
 
   if (!podItems.length) {
-    body.innerHTML = `<div class="dash-filter-row" style="margin-bottom:12px">${srcChips}</div>
-      <div class="study-empty">Chưa có mục nào để phát. Hãy chọn thêm bài học ở Trang chủ.</div>`;
+    const emptyMsg = podSource === 'convo'
+      ? (podConvoError || 'Chưa có bài hội thoại nào để phát.')
+      : 'Chưa có mục nào để phát. Hãy chọn thêm bài học ở Trang chủ.';
+    body.innerHTML = `<div class="dash-filter-row" style="margin-bottom:10px">${srcChips}</div>
+      ${convoPicker}
+      <div class="study-empty">${podEscape(emptyMsg)}</div>`;
     return;
   }
   const cur = podItems[podIdx] || podItems[0];
   const showAns = !podPlaying || podPhase === 'reveal' || podPhase === 'zh2';
   const phaseLabel = !podPlaying ? 'Sẵn sàng phát · Bấm ▶️ để nghe rảnh tay'
-    : podPhase === 'zh1' ? '🔊 Đang đọc tiếng Trung...'
+    : podPhase === 'zh1' ? (cur.speaker ? `🔊 ${podEscape(cur.speaker)} đang nói...` : '🔊 Đang đọc tiếng Trung...')
     : podPhase === 'wait' ? `🤔 Tự nhẩm nghĩa trong ${podPauseSec} giây...`
-    : podPhase === 'reveal' ? '📖 Đáp án & nghĩa tiếng Việt'
+    : podPhase === 'reveal' ? (podReadVi ? '📖 Đáp án & nghĩa tiếng Việt' : '📖 Nội dung & nghĩa tiếng Việt')
     : '🔁 Nhắc lại tiếng Trung';
   const remainSleep = podSleepEndAt > Date.now() ? ` · 🌙 còn ~${Math.max(1, Math.ceil((podSleepEndAt - Date.now()) / 60000))}p` : '';
+  const unitLabel = podSource === 'convo' ? 'Lượt' : 'Mục';
 
   body.innerHTML = `
     <div class="dash-filter-row" style="margin-bottom:10px">${srcChips}</div>
-    <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-bottom:10px">${podEscape(podSourceNote)} · Mục <b>${podIdx + 1}/${podItems.length}</b>${remainSleep}</div>
+    ${convoPicker}
+    <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-bottom:10px">${podEscape(podSourceNote)} · ${unitLabel} <b>${podIdx + 1}/${podItems.length}</b>${remainSleep}</div>
     <div class="gf-pod-stage">
       ${cur.tag ? `<div class="gf-pod-tag">${podEscape(cur.tag)}</div>` : ''}
       <div class="gf-pod-hz">${podHideText && podPlaying && !showAns ? '• • •' : podEscape(cur.hz)}</div>
@@ -483,15 +899,15 @@ function podRender() {
       </div>
       <div id="pod-phase" class="gf-pod-phase">${phaseLabel}</div>
       <div class="gf-pod-controls">
-        <button type="button" class="btn btn-sm" onclick="podJump(-1)" aria-label="Từ trước">⏮ Trước</button>
+        <button type="button" class="btn btn-sm" onclick="podJump(-1)" aria-label="${podSource === 'convo' ? 'Lượt trước' : 'Từ trước'}">⏮ Trước</button>
         <button type="button" id="pod-play-btn" class="btn btn-primary" onclick="podTogglePlay()">${podPlaying ? '⏸ Tạm dừng' : '▶️ Bắt đầu phát'}</button>
-        <button type="button" class="btn btn-sm" onclick="podJump(1)" aria-label="Từ sau">Tiếp ⏭</button>
+        <button type="button" class="btn btn-sm" onclick="podJump(1)" aria-label="${podSource === 'convo' ? 'Lượt sau' : 'Từ sau'}">Tiếp ⏭</button>
       </div>
     </div>
     <div class="gf-pod-opts">
       <label class="gf-pod-opt"><span>⏳ Nghỉ nhớ:</span>
         <select onchange="podPauseSec=Number(this.value)">
-          ${[1.5, 2.5, 4, 6].map(s => `<option value="${s}"${podPauseSec === s ? ' selected' : ''}>${s} giây</option>`).join('')}
+          ${[[0.6, '0.6 giây (thoại nhanh)'], [1.5, '1.5 giây'], [2.5, '2.5 giây'], [4, '4 giây'], [6, '6 giây']].map(([s, lbl]) => `<option value="${s}"${podPauseSec === s ? ' selected' : ''}>${lbl}</option>`).join('')}
         </select>
       </label>
       <label class="gf-pod-opt"><span>🌙 Hẹn tắt:</span>

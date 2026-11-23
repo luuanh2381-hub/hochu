@@ -4,17 +4,24 @@
 let browserTtsVoice = null;
 let ttsRate = 0.9;
 let edgeTtsVoice = 'zh-CN-XiaoxiaoNeural';
+const EDGE_TTS_VI_VOICE = 'vi-VN-HoaiMyNeural'; // Nghe rảnh tay: đọc nghĩa tiếng Việt qua <audio> khi tắt màn hình
 let edgeTtsAudio = null;
 let edgeTtsObjectUrl = null;
+let ttsHoldObjectUrl = null; // WAV im lặng giữ phiên audio nền trong lúc chờ mạng tải đoạn kế
 let ttsToken = 0;          // tăng mỗi lần phát/dừng → vòng lặp cũ tự thoát
 let ttsSeq = null;         // { token, paused } của chuỗi đang phát
 let edgeTtsControllers = new Set(); // V148: các request /api/tts đang chạy (đoạn hiện tại + đoạn tải trước) → bấm dừng hủy được hết
+let ttsPrefetchControllers = new Set(); // request tải trước của chế độ Podcast (chỉ huỷ khi bấm Dừng, không bị cắt khi chuyển đoạn)
 let edgeTtsDbPromise = null;
 let ttsEl = null;          // V147: MỘT phần tử <audio> dùng lại cho mọi lần phát (iOS/Safari chỉ mở khoá autoplay cho phần tử đã được chạm)
 let ttsPlayCancel = null;  // V147: huỷ lần phát đang chờ (dừng bấm → promise phát được giải phóng, không treo)
 let ttsUnlocked = false;
 const TTS_SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 let edgeTtsInflight = new Map(); // key → Promise<Blob>: bấm nhanh liên tục chỉ tải 1 lần
+let ttsPrefetchInflight = new Map(); // memKey → Promise<Blob> cho prefetch Podcast
+let ttsMemCache = new Map();     // memKey → Blob (RAM cache tối đa 24 đoạn → chuyển đoạn 0 ms khi tắt màn hình)
+let ttsSilenceCache = new Map(); // durationMs → WAV Blob im lặng 16-bit PCM 8kHz mono
+let ttsPrefetchActive = false;
 
 function initTTS() {
   if (!('speechSynthesis' in window)) return;
@@ -185,8 +192,87 @@ async function edgeTtsCacheDelete(key) {
   });
 }
 
-function ttsTrackController(controller) { edgeTtsControllers.add(controller); return controller; }
-function ttsUntrackController(controller) { edgeTtsControllers.delete(controller); }
+function ttsMemKey(text, voice, rate) { return voice + '\u0000' + rate + '\u0000' + text; }
+function ttsMemGet(text, voice, rate) { return ttsMemCache.get(ttsMemKey(text, voice, rate)) || null; }
+function ttsMemPut(text, voice, rate, blob) {
+  if (!blob) return;
+  const k = ttsMemKey(text, voice, rate);
+  if (ttsMemCache.has(k)) ttsMemCache.delete(k);
+  ttsMemCache.set(k, blob);
+  while (ttsMemCache.size > 24) {
+    const oldest = ttsMemCache.keys().next().value;
+    ttsMemCache.delete(oldest);
+  }
+}
+
+// Tạo tệp WAV 16-bit PCM mono 8 kHz im lặng đúng thời lượng ms — phát trên thẻ <audio> dùng chung
+// giúp giữ phiên âm thanh nền liên tục khi màn hình khoá (tránh OS đóng băng tab như setTimeout).
+function ttsSilenceBlob(ms) {
+  const dur = Math.max(100, Math.min(30000, Math.round((Number(ms) || 0) / 50) * 50));
+  if (ttsSilenceCache.has(dur)) return ttsSilenceCache.get(dur);
+  if (typeof Uint8Array !== 'function' || typeof DataView !== 'function' || typeof Blob !== 'function') return null;
+  const sampleRate = 8000;
+  const numSamples = Math.max(1, Math.round((sampleRate * dur) / 1000));
+  const dataBytes = numSamples * 2; // 16-bit signed PCM mono (toàn số 0 = im lặng)
+  const buf = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(buf);
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  str(8, 'WAVE');
+  str(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);          // PCM
+  view.setUint16(22, 1, true);          // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);          // block align
+  view.setUint16(34, 16, true);         // bits per sample
+  str(36, 'data');
+  view.setUint32(40, dataBytes, true);
+  const blob = new Blob([buf], { type: 'audio/wav' });
+  if (ttsSilenceCache.size >= 16) {
+    const oldest = ttsSilenceCache.keys().next().value;
+    ttsSilenceCache.delete(oldest);
+  }
+  ttsSilenceCache.set(dur, blob);
+  return blob;
+}
+
+function ttsStopHoldSilence() {
+  if (ttsEl) { try { ttsEl.loop = false; } catch (_) {} }
+  if (ttsHoldObjectUrl) {
+    try { URL.revokeObjectURL(ttsHoldObjectUrl); } catch (_) {}
+    ttsHoldObjectUrl = null;
+  }
+}
+
+function ttsStartHoldSilence() {
+  if (ttsHoldObjectUrl || edgeTtsAudio) return;
+  const blob = ttsSilenceBlob(1000);
+  if (!blob || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return;
+  try {
+    const audio = ttsElement();
+    const url = URL.createObjectURL(blob);
+    ttsHoldObjectUrl = url;
+    audio.onplay = audio.onended = audio.onerror = null;
+    audio.loop = true;
+    audio.src = url;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => { ttsStopHoldSilence(); });
+  } catch (_) {
+    ttsStopHoldSilence();
+  }
+}
+
+function ttsTrackController(controller) {
+  (ttsPrefetchActive ? ttsPrefetchControllers : edgeTtsControllers).add(controller);
+  return controller;
+}
+function ttsUntrackController(controller) {
+  edgeTtsControllers.delete(controller);
+  ttsPrefetchControllers.delete(controller);
+}
 
 function ttsStopCurrent() {
   edgeTtsControllers.forEach(c => { try { c.abort(); } catch (_) {} });
@@ -195,9 +281,12 @@ function ttsStopCurrent() {
   const cancel = ttsPlayCancel;
   ttsPlayCancel = null;
   if (cancel) { try { cancel(); } catch (_) {} }
+  ttsStopHoldSilence();
   if (edgeTtsAudio) {
-    try { edgeTtsAudio.pause(); } catch (_) {}
+    try { edgeTtsAudio.loop = false; edgeTtsAudio.pause(); } catch (_) {}
     edgeTtsAudio = null;
+  } else if (ttsEl) {
+    try { ttsEl.pause(); } catch (_) {}
   }
   if (edgeTtsObjectUrl) {
     try { URL.revokeObjectURL(edgeTtsObjectUrl); } catch (_) {}
@@ -209,21 +298,34 @@ function ttsStopCurrent() {
   }
 }
 
-function ttsStop() { ttsToken++; ttsStopCurrent(); }
+function ttsStop() {
+  ttsToken++;
+  ttsPrefetchControllers.forEach(c => { try { c.abort(); } catch (_) {} });
+  ttsPrefetchControllers.clear();
+  ttsPrefetchInflight.clear();
+  ttsStopCurrent();
+}
 
-function speakWithWebSpeech(text, hooks, rate) {
+function speakWithWebSpeech(text, hooks, rate, lang) {
   if (!('speechSynthesis' in window)) {
     if (hooks && hooks.error) hooks.error();
     return;
   }
   const r = Number(rate);
   const useRate = Number.isFinite(r) && r > 0 ? r : ttsRate;
+  const targetLang = lang || 'zh-CN';
+  const isVi = targetLang.toLowerCase().startsWith('vi');
+  let useVoice = browserTtsVoice;
+  if (isVi) {
+    const voices = speechSynthesis.getVoices ? speechSynthesis.getVoices() : [];
+    useVoice = voices.find(v => v.lang && v.lang.toLowerCase().startsWith('vi')) || null;
+  }
   const phrases = splitPhrases(text);
   const make = (part, quiet) => {
     const utt = new SpeechSynthesisUtterance(part);
-    utt.lang = 'zh-CN'; utt.rate = useRate;
-    if (quiet) utt.volume = 0; else utt.pitch = 1.05;
-    if (browserTtsVoice) utt.voice = browserTtsVoice;
+    utt.lang = targetLang; utt.rate = useRate;
+    if (quiet) utt.volume = 0; else utt.pitch = isVi ? 1.0 : 1.05;
+    if (useVoice) utt.voice = useVoice;
     return utt;
   };
   if (phrases.length <= 1) {
@@ -295,14 +397,21 @@ async function edgeTtsFetch(text, voice, rate) {
 }
 
 async function ttsBlobFor(text, voice, rate) {
+  const mem = ttsMemGet(text, voice, rate);
+  if (mem) { edgeTtsLog('AUDIO_CACHE_HIT', voice + ' · ' + rate); return mem; }
+  const pre = ttsPrefetchInflight.get(ttsMemKey(text, voice, rate));
+  if (pre) {
+    try { const b = await pre; if (b) return b; } catch (_) {}
+  }
   const key = await edgeTtsCacheKey(text, voice, rate);
   const cached = await edgeTtsCacheGet(key);
-  if (cached) { edgeTtsLog('AUDIO_CACHE_HIT', voice + ' · ' + rate); return cached; }
+  if (cached) { ttsMemPut(text, voice, rate, cached); edgeTtsLog('AUDIO_CACHE_HIT', voice + ' · ' + rate); return cached; }
   const running = edgeTtsInflight.get(key);
   if (running) return running;
   let putDone = Promise.resolve();
   const job = (async () => {
     const blob = await edgeTtsFetch(text, voice, rate); // V148: gọi Edge-TTS trực tiếp (/api/tts), không qua kho lưu trữ nào
+    ttsMemPut(text, voice, rate, blob);
     putDone = edgeTtsCachePut(key, blob, { voice, rate }).catch(() => {});
     // Chờ ghi cache tối đa 150 ms (đủ để "cache hỏng → xoá → tải lại" không bị ghi đè); IndexedDB chậm hơn thì cứ phát, ghi tiếp nền.
     await Promise.race([putDone, new Promise(r => setTimeout(r, 150))]);
@@ -311,6 +420,37 @@ async function ttsBlobFor(text, voice, rate) {
   const release = () => { if (edgeTtsInflight.get(key) === job) edgeTtsInflight.delete(key); };
   job.then(() => putDone.then(release, release), release);
   edgeTtsInflight.set(key, job);
+  return job;
+}
+
+// Tải trước 1 đoạn âm thanh cho Podcast mà không bị huỷ khi chuyển đoạn (chỉ huỷ khi gọi ttsStop()).
+function ttsPrefetch(text, voice, rate) {
+  if (typeof text !== 'string' || !text.trim()) return Promise.resolve(null);
+  const clean = text.trim();
+  const v = voice || edgeTtsVoice;
+  const r = rate ? String(rate) : (Math.round(ttsRate * 10) / 10).toFixed(1);
+  const mem = ttsMemGet(clean, v, r);
+  if (mem) return Promise.resolve(mem);
+  const mk = ttsMemKey(clean, v, r);
+  const running = ttsPrefetchInflight.get(mk);
+  if (running) return running;
+  const job = (async () => {
+    const key = await edgeTtsCacheKey(clean, v, r);
+    const cached = await edgeTtsCacheGet(key);
+    if (cached) { ttsMemPut(clean, v, r, cached); return cached; }
+    ttsPrefetchActive = true;
+    let req;
+    try { req = edgeTtsFetch(clean, v, r); }
+    finally { ttsPrefetchActive = false; }
+    const blob = await req;
+    ttsMemPut(clean, v, r, blob);
+    edgeTtsCachePut(key, blob, { voice: v, rate: r }).catch(() => {});
+    return blob;
+  })();
+  const release = () => { if (ttsPrefetchInflight.get(mk) === job) ttsPrefetchInflight.delete(mk); };
+  job.then(release, release);
+  job.catch(() => {});
+  ttsPrefetchInflight.set(mk, job);
   return job;
 }
 
@@ -333,13 +473,13 @@ function ttsUnlock() {
   try {
     if (typeof AC !== 'undefined' && AC && AC.state === 'suspended' && AC.resume) AC.resume().catch(() => {});
   } catch (_) {}
-  if (edgeTtsAudio) { ttsUnlockDone(); return; } // đang phát thật rồi → đã được phép
+  if (edgeTtsAudio || ttsHoldObjectUrl) { ttsUnlockDone(); return; } // đang phát thật hoặc giữ phiên rồi → đã được phép
   try {
     const el = ttsElement();
     ttsUnlocking = true;
     el.src = TTS_SILENT_WAV;
     const p = el.play();
-    const quiet = () => { if (!edgeTtsAudio) { try { el.pause(); el.removeAttribute('src'); } catch (_) {} } };
+    const quiet = () => { if (!edgeTtsAudio && !ttsHoldObjectUrl) { try { el.pause(); el.removeAttribute('src'); } catch (_) {} } };
     if (p && typeof p.then === 'function') {
       p.then(() => { quiet(); ttsUnlockDone(); }, () => { ttsUnlocking = false; });
     } else { quiet(); ttsUnlockDone(); }
@@ -358,12 +498,15 @@ function ttsPlayBlob(blob, onStart) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     const audio = ttsElement();
+    ttsStopHoldSilence();
     audio.onplay = audio.onended = audio.onerror = null;
+    audio.loop = false;
     edgeTtsAudio = audio;
     edgeTtsObjectUrl = url;
     let done = false;
     const cleanup = () => {
       audio.onplay = audio.onended = audio.onerror = null;
+      audio.loop = false;
       try { URL.revokeObjectURL(url); } catch (_) {}
       if (edgeTtsObjectUrl === url) edgeTtsObjectUrl = null;
       if (edgeTtsAudio === audio) edgeTtsAudio = null;
@@ -386,14 +529,52 @@ function ttsPlayBlob(blob, onStart) {
   });
 }
 
-async function ttsPlaySegment(seg, onStart, token, blobPromise) {
-  let blob = await (blobPromise || ttsBlobFor(seg.text, seg.voice, seg.rate));
-  if (token != null && token !== ttsToken) return; // đã bấm dừng trong lúc tải → không phát nữa
+function ttsWaitFallback(ms, token) {
+  return new Promise((resolve) => {
+    if (token !== ttsToken) return resolve(false);
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      if (ttsPlayCancel === cancel) ttsPlayCancel = null;
+      resolve(ok);
+    };
+    const cancel = () => finish(false);
+    ttsPlayCancel = cancel;
+    const t = setTimeout(() => finish(token === ttsToken), ms);
+  });
+}
+
+// Phát khoảng lặng đúng thời lượng ms trên <audio> dùng chung để giữ phiên nền khi khoá màn hình.
+function ttsPlaySilence(ms) {
+  const dur = Math.max(0, Number(ms) || 0);
+  if (dur <= 0) return Promise.resolve(true);
+  const token = ++ttsToken;
+  ttsStopCurrent();
+  const blob = ttsSilenceBlob(dur);
+  if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Audio !== 'undefined') {
+    return ttsPlayBlob(blob, null)
+      .then(() => token === ttsToken)
+      .catch(() => ttsWaitFallback(dur, token));
+  }
+  return ttsWaitFallback(dur, token);
+}
+
+async function ttsPlaySegment(seg, onStart, token, blobPromise, keepAlive) {
+  let blob = ttsMemGet(seg.text, seg.voice, seg.rate);
+  if (!blob) {
+    if (keepAlive) ttsStartHoldSilence();
+    blob = await (blobPromise || ttsBlobFor(seg.text, seg.voice, seg.rate));
+  }
+  if (token != null && token !== ttsToken) { ttsStopHoldSilence(); return; } // đã bấm dừng trong lúc tải → không phát nữa
   try {
     await ttsPlayBlob(blob, onStart);
   } catch (err) {
+    ttsStopHoldSilence();
     // Cache hỏng (không giải mã được) → xoá bản lỗi và tải lại đúng 1 lần.
     if (!err || (err.name !== 'NotSupportedError' && err.name !== 'EncodingError')) throw err;
+    ttsMemCache.delete(ttsMemKey(seg.text, seg.voice, seg.rate));
     const key = await edgeTtsCacheKey(seg.text, seg.voice, seg.rate);
     await edgeTtsCacheDelete(key);
     blob = await ttsBlobFor(seg.text, seg.voice, seg.rate);
@@ -424,17 +605,22 @@ function ttsWait(ms, seq) {
 }
 
 // Phát lần lượt các đoạn (mỗi đoạn 1 giọng/tốc độ), không chồng lấn, dừng/tiếp tục được.
-// segments: [{ text, voice, rate, gapAfter }]
-async function ttsSpeakSegments(segments, hooks) {
+// segments: [{ text, voice, rate, gapAfter, lang }]
+async function ttsSpeakSegments(segments, hooks, opts) {
   const defaultRate = (Math.round(ttsRate * 10) / 10).toFixed(1);
+  const keepAlive = !!(opts && opts.keepAlive);
   const list = (segments || [])
     .filter(s => s && typeof s.text === 'string' && s.text.trim())
-    .map(s => ({
-      text: s.text,
-      voice: s.voice || edgeTtsVoice,
-      rate: s.rate || defaultRate,
-      gapAfter: s.gapAfter,
-    }));
+    .map(s => {
+      const voice = s.voice || edgeTtsVoice;
+      return {
+        text: s.text,
+        voice,
+        rate: s.rate || defaultRate,
+        gapAfter: s.gapAfter,
+        lang: s.lang || (String(voice).toLowerCase().startsWith('vi') ? 'vi-VN' : 'zh-CN'),
+      };
+    });
   if (!list.length) { if (hooks && hooks.error) hooks.error(); return; }
   const token = ++ttsToken;
   ttsStopCurrent();
@@ -449,7 +635,7 @@ async function ttsSpeakSegments(segments, hooks) {
       start: started ? null : (hooks && hooks.start),
       end: hooks && hooks.end,
       error: hooks && hooks.error,
-    }, list[from] && list[from].rate);
+    }, list[from] && list[from].rate, list[from] && list[from].lang);
   };
   // V147: tải trước đoạn kế tiếp trong lúc đoạn hiện tại đang tải/phát → hết khựng giữa các đoạn / lượt hội thoại.
   const blobs = [];
@@ -465,7 +651,7 @@ async function ttsSpeakSegments(segments, hooks) {
     await ttsAwaitResume(seq);
     if (token !== ttsToken) return;
     try {
-      await ttsPlaySegment(seg, onStart, token, blobs[i]);
+      await ttsPlaySegment(seg, onStart, token, blobs[i], keepAlive);
     } catch (err) {
       if (token !== ttsToken) return;
       if (err && err.ttsKind === 'api') {
@@ -479,7 +665,15 @@ async function ttsSpeakSegments(segments, hooks) {
     }
     if (token !== ttsToken) return;
     const gap = seg.gapAfter != null ? seg.gapAfter : (typeof TT !== 'undefined' ? TT.pauseAfter(seg.text) : 0);
-    if (gap > 0 && i < list.length - 1) await ttsWait(gap, seq);
+    if (gap > 0 && i < list.length - 1) {
+      if (keepAlive) {
+        const sBlob = ttsSilenceBlob(gap);
+        if (sBlob) { try { await ttsPlayBlob(sBlob, null); } catch (_) { await ttsWait(gap, seq); } }
+        else await ttsWait(gap, seq);
+      } else {
+        await ttsWait(gap, seq);
+      }
+    }
   }
   if (token !== ttsToken) return;
   edgeTtsLog('EDGE_TTS_SUCCESS', list.length > 1 ? list.length + ' đoạn' : (list[0].voice || ''));
@@ -494,20 +688,28 @@ async function speak(text, hooks, opts) {
   }
   if (!(opts && opts.raw) && typeof ttsResolve === 'function') text = ttsResolve(text);
   const cleanText = text.trim();
+  const voice = (opts && opts.voice) ? String(opts.voice) : edgeTtsVoice;
+  const lang = (opts && opts.lang) ? String(opts.lang) : (voice.toLowerCase().startsWith('vi') ? 'vi-VN' : 'zh-CN');
   const rate = (opts && opts.rate) ? String(opts.rate) : (Math.round(ttsRate * 10) / 10).toFixed(1);
   const split = (typeof TT !== 'undefined' && TT.splitSpeech) ? TT.splitSpeech : (t => [t]);
   const chunks = split(cleanText, (typeof TT !== 'undefined' && TT.DEFAULT_MAX) || 480);
   const segments = chunks.map(c => ({
     text: c,
-    voice: edgeTtsVoice,
+    voice,
     rate,
+    lang,
     gapAfter: (typeof TT !== 'undefined' && TT.pauseAfter) ? TT.pauseAfter(c) : 0,
   }));
-  await ttsSpeakSegments(segments, hooks);
+  await ttsSpeakSegments(segments, hooks, opts && opts.keepAlive ? { keepAlive: true } : null);
 }
 
 // Nghe chậm: chỉ đổi tốc độ cho lần phát này, không đổi cài đặt chung.
-function speakSlow(text, hooks) { return speak(text, hooks, { rate: '0.8' }); }
+function speakSlow(text, hooks, opts) { return speak(text, hooks, Object.assign({}, opts || {}, { rate: '0.8' })); }
+
+// Đọc nghĩa tiếng Việt qua Edge-TTS (<audio>) để phát liên tục cả khi tắt màn hình; tự dự phòng Web Speech nếu mất mạng.
+function speakVi(text, hooks, opts) {
+  return speak(text, hooks, Object.assign({ raw: true, voice: EDGE_TTS_VI_VOICE, rate: '1.0', lang: 'vi-VN' }, opts || {}));
+}
 
 // Nút "Kiểm tra giọng đọc": gọi thẳng endpoint thật (bỏ qua cache) cho từng giọng
 // và báo rõ kết quả ở #tts-status, tách lỗi API với lỗi phát.

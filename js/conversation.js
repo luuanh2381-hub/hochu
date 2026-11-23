@@ -184,8 +184,13 @@ function renderConvoList() {
     `<button type="button" class="cv-seg-btn${convoFilters.hsk_level === val ? ' is-on' : ''}" onclick="setConvoFilter('hsk_level', '${val}')">${label}</button>`;
   return `<div class="cv">
     <header class="cv-head">
-      <h2 class="cv-h">Hội thoại</h2>
-      <p class="cv-sub">Luyện nghe – đọc theo tình huống thực tế · HSK 3–4</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <h2 class="cv-h">Hội thoại</h2>
+          <p class="cv-sub">Luyện nghe – đọc theo tình huống thực tế · HSK 3–4</p>
+        </div>
+        <button type="button" class="cv-btn" onclick="if(typeof openHandsFreeConvo==='function')openHandsFreeConvo()" title="Nghe thụ động hội thoại, hỗ trợ tắt màn hình">📻 Nghe rảnh tay</button>
+      </div>
     </header>
     <div id="convo-admin-entry"></div>
     <div class="cv-seg" role="group" aria-label="Lọc theo cấp độ">
@@ -245,6 +250,7 @@ function renderConvoDetail(convo) {
 
     <div class="cv-dock" role="toolbar" aria-label="Phát âm thanh">
       <button type="button" class="cv-btn cv-btn-primary cv-dock-main" onclick="convoPlayAll(currentConvo)">${CV_IC.play}<span>Phát tất cả</span></button>
+      <button type="button" class="cv-iconbtn" onclick="if(typeof openHandsFreeConvo==='function')openHandsFreeConvo(currentConvo&&currentConvo.dialogue_id)" aria-label="Nghe rảnh tay (tắt màn hình)" title="Nghe rảnh tay (tắt màn hình)">📻</button>
       <button type="button" class="cv-iconbtn" onclick="pauseSpeaking()" aria-label="Tạm dừng" title="Tạm dừng">${CV_IC.pause}</button>
       <button type="button" class="cv-iconbtn" onclick="resumeSpeaking()" aria-label="Tiếp tục" title="Tiếp tục">${CV_IC.play}</button>
       <button type="button" class="cv-iconbtn" onclick="stopSpeaking()" aria-label="Dừng" title="Dừng">${CV_IC.stop}</button>
