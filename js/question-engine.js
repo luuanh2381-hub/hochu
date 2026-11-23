@@ -588,15 +588,49 @@ const QE = (function () {
   }
   function sentenceBank(ctx) {
     const out = [];
-    for (const e of (ctx.examples || [])) if (e && e.zh && e.vi && sentenceOk(e.zh)) out.push(Object.assign({ zh: e.zh, vi: e.vi }, e.py ? { py: e.py } : null));
-    for (const s of (ctx.sentences || [])) if (s && s.hz && s.vi && sentenceOk(s.hz)) out.push({ zh: s.hz, vi: s.vi });
+    for (const e of (ctx.examples || [])) if (e && e.zh && e.vi && sentenceOk(e.zh)) out.push(Object.assign({ zh: e.zh, vi: e.vi, hz: e.hz || null, l: e.l != null ? e.l : null }, e.py ? { py: e.py } : null));
+    for (const s of (ctx.sentences || [])) if (s && s.hz && s.vi && sentenceOk(s.hz)) out.push({ zh: s.hz, vi: s.vi, hz: s.hint || null, l: s.l != null ? s.l : null });
     return out;
   }
-  function pickSentDistractors(correct, ctx, need, field) {
+  const SENT_STOP_CHARS = new Set('的了在是我你他她它吗呢吧啊也都很和就着过，。！？、；：“”‘’（）() '.split(''));
+  function cjkChars(s) {
+    const out = [];
+    for (const ch of String(s || '')) if (/[\u4e00-\u9fff]/.test(ch)) out.push(ch);
+    return out;
+  }
+  // Chấm điểm câu nhiễu: ưu tiên câu cùng độ dài, cùng cấp bài, chung bối cảnh hoặc chứa từ người học hay nhầm (chống đoán mẹo theo độ dài).
+  function scoreSentenceDistractor(cand, correct, word, ctx) {
+    let score = 0;
+    const cLen = cjkChars(correct.zh).length, xLen = cjkChars(cand.zh).length;
+    const diff = Math.abs(cLen - xLen);
+    if (diff <= 2) score += 3;
+    else if (diff <= 4) score += 1.5;
+    else if (diff >= 10) score -= 2;
+    if (cand.l != null && word && word.l != null) {
+      const ld = Math.abs(Number(cand.l) - Number(word.l));
+      if (ld === 0) score += 2;
+      else if (ld <= 2) score += 1;
+    }
+    const cSet = new Set(cjkChars(correct.zh).filter(ch => !SENT_STOP_CHARS.has(ch)));
+    let shared = 0;
+    for (const ch of new Set(cjkChars(cand.zh))) if (cSet.has(ch)) shared++;
+    if (shared >= 1 && shared <= 3) score += 1.5 + shared * 0.4;
+    if (ctx && Array.isArray(ctx.confusions) && ctx.confusions.length) {
+      for (const cf of ctx.confusions) {
+        const txt = cf && (cf.text !== undefined ? cf.text : cf);
+        if (typeof txt === 'string' && txt && String(cand.zh).includes(txt)) { score += 4; break; }
+      }
+    }
+    return score;
+  }
+  function pickSentDistractors(correct, ctx, need, field, word) {
     const rand = ctx.rand || defaultRand;
     const seenZ = new Set([normText(correct.zh)]), seenV = new Set([normText(correct.vi)]);
+    const candidates = shuffled(sentenceBank(ctx), rand)
+      .map(x => ({ x, s: scoreSentenceDistractor(x, correct, word, ctx) }))
+      .sort((a, b) => b.s - a.s);
     const out = [];
-    for (const x of shuffled(sentenceBank(ctx), rand)) {
+    for (const { x } of candidates) {
       const zz = normText(x.zh), vz = normText(x.vi);
       if (!zz || !vz || seenZ.has(zz)) continue;
       if (field === 'vi') { if (seenV.has(vz) || meaningsOverlap(x.vi, correct.vi)) continue; seenV.add(vz); }
@@ -625,7 +659,7 @@ const QE = (function () {
     if (!sents.length) return null;
     const rand = ctx.rand || defaultRand;
     const s = sents[Math.floor(rand() * sents.length)];
-    const ds = pickSentDistractors(s, ctx, 3, 'vi');
+    const ds = pickSentDistractors(s, ctx, 3, 'vi', word);
     if (ds.length < 3) return null;
     const placed = placeCorrect({ key: s.vi, label: s.vi, sub: null }, ds.map(d => ({ key: d.vi, label: d.vi, sub: null })), ctx);
     return assembleSentence('sent2vi', word, ctx, { kind: 'sent', main: s.zh, sub: null, ask: 'Câu này có nghĩa là gì?' }, placed, s);
@@ -636,7 +670,7 @@ const QE = (function () {
     if (!sents.length) return null;
     const rand = ctx.rand || defaultRand;
     const s = sents[Math.floor(rand() * sents.length)];
-    const ds = pickSentDistractors(s, ctx, 3, 'zh');
+    const ds = pickSentDistractors(s, ctx, 3, 'zh', word);
     if (ds.length < 3) return null;
     const placed = placeCorrect({ key: s.zh, label: s.zh, sub: null }, ds.map(d => ({ key: d.zh, label: d.zh, sub: null })), ctx);
     return assembleSentence('vi2sent', word, ctx, { kind: 'sent', main: s.vi, sub: null, ask: 'Câu nào dưới đây có nghĩa này?' }, placed, s);
@@ -648,7 +682,7 @@ const QE = (function () {
     if (!sents.length) return null;
     const rand = ctx.rand || defaultRand;
     const s = sents[Math.floor(rand() * sents.length)];
-    const ds = pickSentDistractors(s, ctx, 3, 'vi');
+    const ds = pickSentDistractors(s, ctx, 3, 'vi', word);
     if (ds.length < 3) return null;
     const placed = placeCorrect({ key: s.vi, label: s.vi, sub: null }, ds.map(d => ({ key: d.vi, label: d.vi, sub: null })), ctx);
     return assembleSentence('listenSent2vi', word, ctx, { kind: 'audio', audioText: s.zh, ask: 'Nghe cả câu và chọn nghĩa đúng' }, placed, s);
@@ -660,20 +694,22 @@ const QE = (function () {
     if (!sents.length) return null;
     const rand = ctx.rand || defaultRand;
     const s = sents[Math.floor(rand() * sents.length)];
-    const ds = pickSentDistractors(s, ctx, 3, 'zh');
+    const ds = pickSentDistractors(s, ctx, 3, 'zh', word);
     if (ds.length < 3) return null;
     const placed = placeCorrect({ key: s.zh, label: s.zh, sub: null }, ds.map(d => ({ key: d.zh, label: d.zh, sub: null })), ctx);
     return assembleSentence('listenSent2zh', word, ctx, { kind: 'audio', audioText: s.zh, ask: 'Nghe cả câu và chọn câu đúng' }, placed, s);
   }
-  // Chọn câu CÓ dùng từ đang học (đúng 1 đáp án): nhiễu là câu thật KHÔNG chứa từ này.
+  // Chọn câu CÓ dùng từ đang học (đúng 1 đáp án): nhiễu là câu thật KHÔNG chứa từ này, chấm điểm ưu tiên cùng độ dài/cấp bài/từ hay nhầm.
   function buildSentPick(word, ctx) {
     const sents = candSentences(word, ctx, false);
     if (!sents.length) return null;
     const rand = ctx.rand || defaultRand;
     const s = sents[Math.floor(rand() * sents.length)];
-    const pool = sentenceBank(ctx).filter(x => x.zh !== s.zh && !String(x.zh).includes(word.hz));
+    const pool = shuffled(sentenceBank(ctx).filter(x => x.zh !== s.zh && !String(x.zh).includes(word.hz)), rand)
+      .map(x => ({ x, s: scoreSentenceDistractor(x, s, word, ctx) }))
+      .sort((a, b) => b.s - a.s);
     const seen = new Set([normText(s.zh)]), ds = [];
-    for (const x of shuffled(pool, rand)) {
+    for (const { x } of pool) {
       const k = normText(x.zh);
       if (!k || seen.has(k)) continue;
       seen.add(k); ds.push(x);

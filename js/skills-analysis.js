@@ -37,18 +37,85 @@ const saPct = (x) => Math.round(x * 100) + '%';
 
 function saStyle() {
   return `<style>
-    .sa-rec{border:1px solid var(--border);border-left:4px solid var(--l10a,#2980b9);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--paper)}
+    .sa-rec{border:1px solid var(--border);border-left:4px solid var(--active,#b83227);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--paper)}
     .sa-rec-t{font-weight:800;font-size:.92rem}.sa-rec-w{font-size:.8rem;color:var(--muted);line-height:1.5;margin-top:3px}
     .sa-note{font-size:.75rem;color:var(--muted);line-height:1.5;margin-top:8px}
-    .sa-bar-wrap{flex:1;background:var(--active);border-radius:4px;height:10px;overflow:hidden}.sa-bar-in{height:100%;background:var(--l8a,#27ae60)}
+    .sa-bar-wrap{flex:1;background:var(--border);border-radius:999px;height:10px;overflow:hidden}.sa-bar-in{height:100%;background:var(--l8a,#2d6e62);border-radius:999px}
     .sa-brow{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:.78rem}.sa-blbl{width:118px;font-weight:700;line-height:1.25}
     .sa-lv{display:inline-block;font-size:.7rem;font-weight:800;border-radius:8px;padding:2px 8px}
-    .sa-lv-none{background:var(--active);color:var(--muted)}.sa-lv-weak{background:#fadbd8;color:#c0392b}
-    .sa-lv-dev{background:#fdebd0;color:#b9770e}.sa-lv-good{background:#d5f5e3;color:#1e8449}
+    .sa-lv-none{background:var(--paper);border:1px solid var(--border);color:var(--muted)}.sa-lv-weak{background:var(--l1b,#fadbd8);color:var(--l1a,#c0392b)}
+    .sa-lv-dev{background:var(--l2b,#fdebd0);color:var(--l2a,#b9770e)}.sa-lv-good{background:var(--l4b,#d5f5e3);color:var(--l4a,#1e8449)}
     .sa-hist{display:flex;gap:8px;align-items:baseline;font-size:.76rem;padding:4px 0;border-bottom:1px solid var(--border)}
     .sa-hist:last-child{border-bottom:0}
-    .sa-table{width:100%;border-collapse:collapse;font-size:.8rem}.sa-table td,.sa-table th{padding:5px 4px;border-bottom:1px solid var(--border);text-align:left}
+    .sa-table{width:100%;border-collapse:collapse;font-size:.8rem}.sa-table td,.sa-table th{padding:6px 6px;border-bottom:1px solid var(--border);text-align:left}
+    .sa-radar-wrap{display:flex;justify-content:center;margin:6px 0 10px}
+    .sa-radar{width:100%;max-width:290px;height:auto;overflow:visible}
+    .sa-tone-box{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--paper);border:1px solid var(--border);font-size:.8rem;line-height:1.45}
   </style>`;
+}
+
+// Biểu đồ Radar SVG thuần 5 kỹ năng — chỉ vẽ khi có ≥ 2 kỹ năng đủ mẫu (tránh vẽ hình rỗng gây hiểu nhầm).
+function saRenderRadarSvg(skillsObj) {
+  const keys = ['recognition', 'recall', 'listening', 'pinyin', 'context'];
+  const vals = keys.map(k => {
+    const x = skillsObj && skillsObj[k];
+    return (x && x.enough && x.correctedRate != null) ? Math.max(0.06, Math.min(1, Number(x.correctedRate))) : null;
+  });
+  if (vals.filter(v => v != null).length < 2) return '';
+  const cx = 140, cy = 115, R = 74;
+  const pt = (i, r) => {
+    const ang = -Math.PI / 2 + (i * 2 * Math.PI) / keys.length;
+    return [cx + Math.cos(ang) * r, cy + Math.sin(ang) * r];
+  };
+  const rings = [0.33, 0.66, 1].map(f => {
+    const pts = keys.map((_, i) => pt(i, R * f).map(v => v.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${pts}" fill="none" stroke="var(--border-strong,var(--border))" stroke-width="1" stroke-dasharray="${f < 1 ? '3 3' : ''}"/>`;
+  }).join('');
+  const axes = keys.map((_, i) => {
+    const [x, y] = pt(i, R);
+    return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const polyPts = vals.map((v, i) => pt(i, R * (v == null ? 0.08 : v)).map(n => n.toFixed(1)).join(',')).join(' ');
+  const dots = vals.map((v, i) => {
+    if (v == null) return '';
+    const [x, y] = pt(i, R * v);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="var(--active)" stroke="var(--card)" stroke-width="1.5"/>`;
+  }).join('');
+  const labels = keys.map((k, i) => {
+    const [x, y] = pt(i, R + 22);
+    const anchor = Math.abs(x - cx) < 10 ? 'middle' : (x > cx ? 'start' : 'end');
+    const pctTxt = vals[i] != null ? ` ${Math.round(vals[i] * 100)}%` : '';
+    return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="${anchor}" fill="var(--ink)" font-size="10.5" font-weight="700">${escapeHtml(SK_LABEL[k] || k)}${pctTxt}</text>`;
+  }).join('');
+  return `<div class="sa-radar-wrap"><svg class="sa-radar" viewBox="0 0 280 232" role="img" aria-label="Biểu đồ 5 kỹ năng">${rings}${axes}<polygon points="${polyPts}" fill="var(--active)" fill-opacity=".18" stroke="var(--active)" stroke-width="2.2" stroke-linejoin="round"/>${dots}${labels}</svg></div>`;
+}
+
+// Trích chuỗi thanh điệu (1-4) từ pinyin để chẩn đoán cặp thanh hay nhầm cho từng từ.
+function saExtractTones(py) {
+  const map = { 'ā':1,'á':2,'ǎ':3,'à':4,'ē':1,'é':2,'ě':3,'è':4,'ī':1,'í':2,'ǐ':3,'ì':4,'ō':1,'ó':2,'ǒ':3,'ò':4,'ū':1,'ú':2,'ǔ':3,'ù':4,'ǖ':1,'ǘ':2,'ǚ':3,'ǜ':4 };
+  const out = [];
+  for (const ch of String(py || '').toLowerCase()) if (map[ch]) out.push(map[ch]);
+  return out;
+}
+function saRenderToneDiagnosis(word, history) {
+  if (!word || !word.py || !Array.isArray(history) || !history.length) return '';
+  const target = saExtractTones(word.py);
+  if (!target.length) return '';
+  const pairs = {};
+  for (const h of history) {
+    if (h.ok || !h.wrong_answer) continue;
+    const got = saExtractTones(h.wrong_answer);
+    if (got.length !== target.length) continue;
+    for (let i = 0; i < target.length; i++) {
+      if (got[i] !== target[i]) {
+        const key = `Thanh ${target[i]} → nhầm Thanh ${got[i]}`;
+        pairs[key] = (pairs[key] || 0) + 1;
+      }
+    }
+  }
+  const top = Object.entries(pairs).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (!top.length) return '';
+  return `<div class="sa-tone-box">🎵 <b>Chẩn đoán thanh điệu:</b> ${top.map(([k, n]) => `${escapeHtml(k)} (${n} lần)`).join(' · ')}</div>`;
 }
 
 // ── Tải dữ liệu phụ (song song, KHÔNG chặn phần chính; lỗi chỉ làm mất các khối này) ─────────────────
@@ -119,8 +186,9 @@ function saRenderPooled() {
       <div style="display:flex;align-items:center;gap:8px"><div class="sa-bar-wrap"><div class="sa-bar-in" style="width:${w}%"></div></div><span style="width:44px;text-align:right;font-weight:800">${saPct(x.correctedRate)}</span></div>
       <div class="sa-note" style="margin:2px 0 0">Đúng thô ${saPct(x.rawRate)} (${x.correct}/${x.n} lượt; khoảng tin cậy ${saPct(x.ci.lo)}–${saPct(x.ci.hi)})${x.choiceN ? ` · ${x.choiceN} lượt trắc nghiệm` : ''}${x.typedN ? ` · ${x.typedN} lượt tự gõ` : ''}</div></div></div>`;
   }).join('');
-  return `<div class="panel"><div class="panel-title">🧭 Mức từng kỹ năng của bạn</div>${rows}
-    <div class="sa-note">Gộp mọi từ, ${r.windowDays} ngày gần nhất. Thanh = tỉ lệ <b>đã trừ xác suất đoán mò</b> (trắc nghiệm 4 đáp án đúng 25% chỉ nhờ đoán; tự gõ không trừ). Chỉ hiện khi có ≥ ${min} lượt. Các kỹ năng khó khác nhau nên <b>đừng so con số tuyệt đối giữa các kỹ năng</b> — hãy xem xu hướng theo thời gian và khoảng chênh được nêu trong “Gợi ý cho bạn”.</div></div>`;
+  const radar = saRenderRadarSvg(P.skills);
+  return `<div class="panel"><div class="panel-title">🧭 Mức từng kỹ năng của bạn</div>${radar}${rows}
+    <div class="sa-note">Gộp mọi từ, ${r.windowDays} ngày gần nhất. Thanh = tỉ lệ <b>đã trừ xác suất đoán mò</b> (trắc nghiệm 4 đáp án đúng 25% chỉ nhờ đoán; tự gõ và sắp xếp câu không trừ). Chỉ hiện khi có ≥ ${min} lượt. Các kỹ năng khó khác nhau nên <b>đừng so con số tuyệt đối giữa các kỹ năng</b> — hãy xem xu hướng theo thời gian và khoảng chênh được nêu trong “Gợi ý cho bạn”.</div></div>`;
 }
 
 // ── Trí nhớ theo khoảng nghỉ ────────────────────────────────────────────────────────────────────
@@ -232,7 +300,7 @@ function saRenderWordDetail() {
 
   return saStyle() + back + head
     + `<div class="panel"><div class="panel-title">📅 Trạng thái FSRS</div>${fsrs}</div>`
-    + `<div class="panel"><div class="panel-title">🎯 Kỹ năng của từ này</div>${skillRows}${weakTypes}
+    + `<div class="panel"><div class="panel-title">🎯 Kỹ năng của từ này</div>${skillRows}${weakTypes}${saRenderToneDiagnosis(w, d.history)}
         <div class="sa-note">Mỗi kỹ năng đánh giá riêng; cần ≥ 3 lượt hợp lệ mới kết luận, “tốt” cần ≥ 5 lượt. Lượt vừa xem đáp án (kiểm tra ngay sau học, luyện lại câu sai) không được tính vào điểm. Không có điểm tổng hợp.</div></div>`
     + `<div class="panel"><div class="panel-title">💡 Nên luyện gì?</div>${recHtml}</div>`
     + `<div class="panel"><div class="panel-title">🕘 Lịch sử gần đây</div>${hist || '<div class="sa-note">Chưa có lượt nào ghi nhận kỹ năng cho từ này.</div>'}

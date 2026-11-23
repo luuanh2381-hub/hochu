@@ -279,11 +279,15 @@ function renderTodayPanel(data) {
 
   // 8 chế độ học — dùng chung bộ tạo câu hỏi/chấm điểm/ghi kết quả; gom trong mục thu gọn để màn hình không rối.
   const audioOk = (typeof skillAudioAvailable === 'function') && skillAudioAvailable();
-  const mode = (icon, label, onclick, enabled, why) => `<button class="btn" ${enabled ? `onclick="${onclick}"` : 'disabled'} style="text-align:left;padding:10px;font-size:.82rem;line-height:1.3">${icon} ${label}${enabled ? '' : `<div style="font-size:.66rem;font-weight:600;opacity:.8">${why}</div>`}</button>`;
+  const mode = (icon, label, onclick, enabled, why) => `<button class="btn" ${enabled ? `onclick="${onclick}"` : 'disabled'} style="text-align:left;padding:10px 12px;font-size:.82rem;line-height:1.35">${icon} ${label}${enabled ? '' : `<div style="font-size:.66rem;font-weight:600;opacity:.8">${why}</div>`}</button>`;
   const modes = `<details ${nothingToDo ? 'open' : ''} style="margin-top:12px"><summary style="cursor:pointer;font-weight:800;font-size:.9rem;padding:6px 0">🎛 Chế độ học khác</summary>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+    <div class="gf-mode-cat">📜 Ôn chính thức <span class="gf-badge-fsrs">Cập nhật FSRS</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
       ${mode('📅', 'Theo lịch FSRS<br><small>chỉ thẻ đến hạn</small>', "startStudyMode('due')", data.dueCount > 0, 'Không có thẻ đến hạn')}
       ${mode('🆕', 'Học từ mới<br><small>xem → kiểm tra</small>', "startStudyMode('new')", data.newInCurrentLesson > 0, 'Không có từ mới hôm nay')}
+    </div>
+    <div class="gf-mode-cat">🎯 Luyện từng kỹ năng <span class="gf-badge-prac">Luyện bổ sung · không đổi FSRS</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
       ${mode('🧠', 'Nhớ chủ động<br><small>nghĩa → chữ Hán</small>', "skStartPractice('recall')", true, '')}
       ${mode('🎧', 'Luyện nghe<br><small>nghe → chữ Hán / nghĩa</small>', "skStartPractice('listening')", audioOk, 'Máy này không có giọng đọc tiếng Trung')}
       ${mode('🔤', 'Luyện pinyin<br><small>chữ Hán → pinyin</small>', "skStartPractice('pinyin')", true, '')}
@@ -292,7 +296,7 @@ function renderTodayPanel(data) {
       ${mode('🧩', 'Phân biệt từ dễ nhầm', "skStartPractice('confusable')", true, '')}
       ${mode('⏳', 'Kiểm tra sau khoảng nghỉ' + (b ? ` (${b.delayed})` : ''), "skStartPractice('delayed')", !b || b.delayed > 0, 'Chưa có từ đủ điều kiện')}
     </div>
-    <div style="font-weight:800;font-size:.85rem;margin:14px 0 2px">🖐 Chỉ chạm chọn — không gõ phím, không ghi âm</div>
+    <div class="gf-mode-cat">🖐 Chỉ chạm chọn — không gõ phím, không ghi âm</div>
     <div style="font-size:.7rem;color:var(--muted);margin-bottom:6px;line-height:1.4">Không cần bàn phím hay micro: chỉ chạm đáp án (phần ghép cặp nghe chỉ bật khi máy có giọng đọc). Luyện bổ sung, không đổi lịch FSRS. Câu 2 đáp án (A hay B?, Đúng/Sai) không cộng vào điểm kỹ năng.</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       ${mode('🔗', 'Ghép cặp nhanh<br><small>chữ Hán ↔ nghĩa / pinyin / Hán Việt / âm nghe</small>', "rvStartMatchDrill()", true, '')}
@@ -302,7 +306,7 @@ function renderTodayPanel(data) {
       ${mode('✅', 'Đúng hay sai?<br><small>chạm Đúng / Sai nhanh</small>', "skStartPractice('tf')", true, '')}
       ${mode('🧩', 'Sắp xếp câu<br><small>chạm các mảnh theo đúng thứ tự</small>', "skStartPractice('ordersentence')", true, '')}
     </div>
-    <div style="font-size:.7rem;color:var(--muted);margin-top:6px;line-height:1.5">Chế độ 1–2 vẫn là ôn chính thức theo FSRS (có đổi lịch ôn). Các chế độ còn lại là luyện bổ sung: chỉ ghi hồ sơ kỹ năng, <b>không đổi lịch FSRS</b>.
+    <div style="font-size:.7rem;color:var(--muted);margin-top:8px;line-height:1.5">Chế độ 1–2 vẫn là ôn chính thức theo FSRS (có đổi lịch ôn). Các chế độ còn lại là luyện bổ sung: chỉ ghi hồ sơ kỹ năng, <b>không đổi lịch FSRS</b>.
     <label style="display:flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" ${rvTypedEnabled() ? 'checked' : ''} onchange="rvSetTypedEnabled(this.checked)"> Cho phép câu tự gõ đáp án trong “Bắt đầu học”</label>
     <label style="display:flex;gap:6px;align-items:center;margin-top:6px">🧩 Số câu “Sắp xếp câu” thêm vào mỗi buổi “Bắt đầu học”:
       <select onchange="rvSetOrderPerSession(this.value)" style="font:inherit;padding:2px 6px;border-radius:8px;border:1px solid var(--border);background:var(--paper);color:var(--ink)">${[0,1,2,3,4,5].map(n => `<option value="${n}" ${rvOrderPerSession() === n ? 'selected' : ''}>${n === 0 ? 'Tắt' : n + ' câu'}</option>`).join('')}</select></label></div>

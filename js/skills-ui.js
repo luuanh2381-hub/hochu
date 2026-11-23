@@ -5,7 +5,10 @@
 
 const SK_LABEL = { recognition: 'Nhận diện', recall: 'Nhớ chủ động', listening: 'Nghe', pinyin: 'Pinyin', pronunciation: 'Phát âm', context: 'Từ trong câu' };
 const SK_MEASURED = ['recognition', 'recall', 'listening', 'pinyin', 'context'];
-let skState = { loaded: false, loading: false, error: null, overview: null, weak: [], weakHasMore: false, weakOffset: 0, trend: null, bucket: 'week', practice: null };
+let skState = { loaded: false, loading: false, error: null, overview: null, weak: [], weakHasMore: false, weakOffset: 0, weakScopeOnly: false, trend: null, bucket: 'week', subtab: 'all', practice: null };
+
+function skSetSubtab(t) { skState.subtab = t || 'all'; if (currentTab === 'skills') render(); }
+function skToggleWeakScope(on) { skState.weakScopeOnly = !!on; if (currentTab === 'skills') render(); }
 
 function skAudioOk() { return typeof skillAudioAvailable === 'function' && skillAudioAvailable(); }
 
@@ -19,8 +22,18 @@ function renderSkills() {
     return `<div class="panel center" style="padding:24px">⚠️ ${escapeHtml(skState.error)}<br><button class="btn" style="margin-top:10px" onclick="skReload()">Thử lại</button></div>`;
   }
   if (typeof saState !== 'undefined' && saState.word) return saRenderWordDetail(); // V110: xem chi tiết 1 từ
-  // V110: khuyến nghị lên đầu (hành động được), rồi tổng quan, trí nhớ sau khoảng nghỉ, luyện tập, từ yếu, dạng bài, tiến bộ.
-  return saRenderPlan() + saRenderRecs() + saRenderPooled() + skRenderOverview() + saRenderRetention() + skRenderPracticeLauncher() + saRenderWordSearch()
+  const st = skState.subtab || 'all';
+  const tabs = [['all', 'Tất cả'], ['overview', '🎯 Kế hoạch & Kỹ năng'], ['words', '😓 Từ yếu & Luyện'], ['trends', '📈 Trí nhớ & Xu hướng']];
+  const tabBar = `<div class="dash-filter-row" style="margin-bottom:12px">${tabs.map(([id, lb]) =>
+    `<button class="dash-chip${st === id ? ' sel' : ''}" onclick="skSetSubtab('${id}')">${lb}</button>`).join('')}</div>`;
+  // V110: giữ đúng thứ tự các khối (saRenderRecs + saRenderPooled + skRenderOverview); lọc theo sub-tab để tránh cuộn dài.
+  const secOverview = saRenderPlan() + saRenderRecs() + saRenderPooled() + skRenderOverview();
+  const secWords = skRenderPracticeLauncher() + saRenderWordSearch() + skRenderWeakList();
+  const secTrends = saRenderRetention() + saRenderByType() + skRenderTrend();
+  if (st === 'overview') return tabBar + secOverview;
+  if (st === 'words') return tabBar + secWords;
+  if (st === 'trends') return tabBar + secTrends;
+  return tabBar + secOverview + saRenderRetention() + skRenderPracticeLauncher() + saRenderWordSearch()
     + skRenderWeakList() + saRenderByType() + skRenderTrend();
 }
 
@@ -119,38 +132,53 @@ function skRenderOverview() {
 function skRenderPracticeLauncher() {
   const audioOk = skAudioOk();
   const btn = (label, onclick, enabled, why) => `
-    <button class="btn ${enabled ? 'btn-primary' : ''}" ${enabled ? `onclick="${onclick}"` : 'disabled'} style="width:100%;margin-bottom:8px;text-align:left">
-      ${label}${enabled ? '' : `<div style="font-size:.7rem;font-weight:600;opacity:.8">${why}</div>`}
+    <button class="btn" ${enabled ? `onclick="${onclick}"` : 'disabled'} style="text-align:left;padding:10px 12px;font-size:.82rem;line-height:1.35">
+      ${label}${enabled ? '' : `<div style="font-size:.68rem;font-weight:600;opacity:.8">${why}</div>`}
     </button>`;
+  const grp = (title, items) => `<div style="font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 6px">${title}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${items.join('')}</div>`;
   return `
   <div class="panel">
-    <div class="panel-title">🎯 Luyện theo kỹ năng</div>
-    ${btn('🧠 Luyện nhớ chủ động', "skStartPractice('recall')", true, '')}
-    ${btn('🎧 Luyện nghe', "skStartPractice('listening')", audioOk, 'Trình duyệt này không có giọng đọc tiếng Trung')}
-    ${btn('⌨️ Nhớ chủ động — tự gõ chữ Hán', "skStartPractice('recall-typed')", true, '')}
-    ${btn('📖 Luyện từ trong câu', "skStartPractice('context')", true, '')}
-    ${btn('🔤 Luyện Pinyin', "skStartPractice('pinyin')", true, '')}
-    ${btn('⌨️ Pinyin — tự gõ có dấu thanh', "skStartPractice('pinyin-typed')", true, '')}
-    ${btn('🎵 Luyện thanh điệu — nghe, chọn cách đọc', "skStartPractice('tone')", audioOk, 'Trình duyệt này không có giọng đọc tiếng Trung')}
-    ${btn('🧩 Luyện phân biệt từ dễ nhầm', "skStartPractice('confusable')", true, '')}
-    ${btn('🧩 Sắp xếp câu', "skStartPractice('ordersentence')", true, '')}
-    ${btn('📜 Hán Việt — chỉ bấm chọn', "skStartPractice('hanviet')", true, '')}
-    ${btn('👁 Thanh điệu bằng mắt — chỉ bấm chọn', "skStartPractice('tonevis')", true, '')}
-    ${btn('⚔️ A hay B? — các cặp bạn hay nhầm', "skStartPractice('duel')", true, '')}
-    ${btn('✅❌ Đúng hay sai? — chạm Đúng / Sai', "skStartPractice('tf')", true, '')}
-    ${btn('⏳ Kiểm tra sau một khoảng nghỉ', "skStartPractice('delayed')", true, '')}
-    ${btn('🔀 Luyện tổng hợp', "skStartPractice('mixed')", true, '')}
-    <div style="font-size:.72rem;color:var(--muted);line-height:1.5">Luyện bổ sung không thay đổi lịch ôn FSRS. Chỉ dùng các từ bạn đã ôn ít nhất 1 lần. “Phân biệt từ dễ nhầm” chỉ có với các từ thuộc nhóm chữ dễ nhầm; “Kiểm tra sau một khoảng nghỉ” chọn từ đã học ổn định, chưa đến hạn và đã lâu chưa gặp.</div>
+    <div class="panel-title">🎯 Luyện theo kỹ năng <span style="margin-left:auto;font-size:.68rem;font-weight:700;opacity:.75">Luyện bổ sung · không đổi FSRS</span></div>
+    ${grp('Nhớ & Nhận diện', [
+      btn('🧠 Luyện nhớ chủ động', "skStartPractice('recall')", true, ''),
+      btn('⌨️ Nhớ chủ động — tự gõ chữ Hán', "skStartPractice('recall-typed')", true, ''),
+      btn('🧩 Luyện phân biệt từ dễ nhầm', "skStartPractice('confusable')", true, ''),
+      btn('⏳ Kiểm tra sau một khoảng nghỉ', "skStartPractice('delayed')", true, ''),
+    ])}
+    ${grp('Nghe & Pinyin / Thanh điệu', [
+      btn('🎧 Luyện nghe', "skStartPractice('listening')", audioOk, 'Trình duyệt này không có giọng đọc tiếng Trung'),
+      btn('🎵 Luyện thanh điệu — nghe, chọn cách đọc', "skStartPractice('tone')", audioOk, 'Trình duyệt này không có giọng đọc tiếng Trung'),
+      btn('🔤 Luyện Pinyin', "skStartPractice('pinyin')", true, ''),
+      btn('⌨️ Pinyin — tự gõ có dấu thanh', "skStartPractice('pinyin-typed')", true, ''),
+    ])}
+    ${grp('Câu, Ngữ cảnh & Chạm nhanh', [
+      btn('📖 Luyện từ trong câu', "skStartPractice('context')", true, ''),
+      btn('🧩 Sắp xếp câu', "skStartPractice('ordersentence')", true, ''),
+      btn('📜 Hán Việt — chỉ bấm chọn', "skStartPractice('hanviet')", true, ''),
+      btn('👁 Thanh điệu bằng mắt — chỉ bấm chọn', "skStartPractice('tonevis')", true, ''),
+      btn('⚔️ A hay B? — các cặp bạn hay nhầm', "skStartPractice('duel')", true, ''),
+      btn('✅❌ Đúng hay sai? — chạm Đúng / Sai', "skStartPractice('tf')", true, ''),
+      btn('🔀 Luyện tổng hợp', "skStartPractice('mixed')", true, ''),
+    ])}
+    <div style="font-size:.72rem;color:var(--muted);line-height:1.5;margin-top:10px">Luyện bổ sung không thay đổi lịch ôn FSRS. Chỉ dùng các từ bạn đã ôn ít nhất 1 lần. “Phân biệt từ dễ nhầm” chỉ có với các từ thuộc nhóm chữ dễ nhầm; “Kiểm tra sau một khoảng nghỉ” chọn từ đã học ổn định, chưa đến hạn và đã lâu chưa gặp.</div>
   </div>`;
 }
 
 function skRenderWeakList() {
-  const items = skState.weak;
+  const allItems = skState.weak || [];
+  const inScope = (it) => (typeof isLessonInSelection !== 'function' || it.l == null) ? true : isLessonInSelection(it.l);
+  const items = skState.weakScopeOnly ? allItems.filter(inScope) : allItems;
+  const scopeToggle = `<div class="dash-filter-row" style="margin-bottom:8px">
+    <button class="dash-chip${!skState.weakScopeOnly ? ' sel' : ''}" onclick="skToggleWeakScope(false)">Tất cả bài (${allItems.length})</button>
+    <button class="dash-chip${skState.weakScopeOnly ? ' sel' : ''}" onclick="skToggleWeakScope(true)">Phạm vi đang chọn</button>
+  </div>`;
   if (!items.length) {
-    return `<div class="panel"><div class="panel-title">😓 Từ cần cải thiện</div>
-      <div style="color:var(--muted);font-size:.9rem">Chưa có từ nào đủ dữ liệu để kết luận là yếu. Hãy học thêm ở Trắc nghiệm, Gõ chữ, Nghe – Chọn hoặc Hôm nay học — mỗi kỹ năng cần ít nhất 3 lượt trên cùng một từ.</div></div>`;
+    return `<div class="panel"><div class="panel-title">😓 Từ cần cải thiện</div>${allItems.length ? scopeToggle : ''}
+      <div style="color:var(--muted);font-size:.9rem">${allItems.length ? 'Không có từ yếu nào trong phạm vi Quyển/bài đang chọn.' : 'Chưa có từ nào đủ dữ liệu để kết luận là yếu. Hãy học thêm ở Trắc nghiệm, Gõ chữ, Nghe – Chọn hoặc Hôm nay học — mỗi kỹ năng cần ít nhất 3 lượt trên cùng một từ.'}</div></div>`;
   }
-  const rows = items.map((it, i) => `
+  const rows = items.map((it) => {
+    const idx = allItems.indexOf(it);
+    return `
     <div class="sk-row">
       <div class="sk-hz">${escapeHtml(it.hz)}</div>
       <div class="sk-info">
@@ -160,11 +188,12 @@ function skRenderWeakList() {
           <span style="font-size:.72rem;color:var(--muted)"> ${it.correct}/${it.attempts} đúng · ~${Math.round(it.score * 100)}%</span></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <button class="btn btn-sm" onclick="skStartPracticeWord(${i})" ${it.skill === 'listening' && !skAudioOk() ? 'disabled' : ''}>Luyện</button>
-        <button class="btn btn-sm" style="background:var(--border)" onclick="saOpenWord('${escapeJsAttr(it.hz)}')">Chi tiết</button>
+        <button class="btn btn-sm" onclick="skStartPracticeWord(${idx})" ${it.skill === 'listening' && !skAudioOk() ? 'disabled' : ''}>Luyện</button>
+        <button class="btn btn-sm" onclick="saOpenWord('${escapeJsAttr(it.hz)}')">Chi tiết</button>
       </div>
-    </div>`).join('');
-  return `<div class="panel"><div class="panel-title">😓 Từ cần cải thiện</div>${rows}
+    </div>`;
+  }).join('');
+  return `<div class="panel"><div class="panel-title">😓 Từ cần cải thiện</div>${scopeToggle}${rows}
     ${skState.weakHasMore ? `<button class="btn" style="width:100%;margin-top:10px" onclick="skLoadMoreWeak()">Xem thêm</button>` : ''}</div>`;
 }
 

@@ -287,14 +287,21 @@ function rvBuildQuestionFor(item) {
   if (item.type === 'check') return officialQ(false); // giữ nguyên ngữ nghĩa cũ: check/drill không ép fsrsOnly
   if (item.type === 'drill') return officialQ(false);
   if (item.type === 'extra' || item.type === 'redo') {
-    // V138: câu luyện thêm cũng hỏi THEO CÂU (không còn trắc nghiệm từ đơn lẻ). Không dựng được câu nào → null
-    // (thẻ bị bỏ khỏi buổi này, KHÔNG rơi về dạng hỏi nghĩa của một từ).
+    // Câu luyện thêm / làm lại (KHÔNG đụng lịch FSRS): ưu tiên đúng kỹ năng mục tiêu (`item.targetSkill`).
+    // Nếu kỹ năng mục tiêu thuộc nhóm chưa có dạng câu (recognition/recall/pinyin) thì chọn đúng dạng luyện của kỹ năng đó
+    // để Kế hoạch năng lực V128 thật sự luyện đúng kỹ năng đang tụt lại thay vì rơi về context/listening.
     const opts = Object.assign({}, base, { allowPracticeOnly: true, exclude: item.failedTypes || [] });
     const mq = modeQ(false, { allowPracticeOnly: true, exclude: item.failedTypes || [] }, item.targetSkill); // V168: câu luyện thêm cũng theo chế độ đang chọn (vẫn là luyện bổ sung)
     if (mq) return mq;
-    const only = item.targetSkill ? rvSentenceTypes(item.targetSkill) : [];
+    const SKILL_EXTRA_TYPES = {
+      recognition: ['hz2vi', 'py2vi', 'hz2hv'],
+      recall: ['vi2hz', 'typeVi2hz', 'py2hz', 'confusable'],
+      pinyin: ['hz2py', 'hz2tone', 'vi2py', 'typeHz2py'],
+    };
+    const sentOnly = item.targetSkill ? rvSentenceTypes(item.targetSkill) : [];
+    const skillOnly = sentOnly.length ? sentOnly : ((item.targetSkill && SKILL_EXTRA_TYPES[item.targetSkill]) || []);
     // Ưu tiên đúng kỹ năng đang yếu; nếu kỹ năng đó không dựng được câu hợp lệ thì thử bất kỳ câu hỏi theo câu nào khác.
-    const q = (only.length && QS.choose(w, ctx, Object.assign({}, opts, { only })))
+    const q = (skillOnly.length && QS.choose(w, ctx, Object.assign({}, opts, { only: skillOnly })))
       || QS.choose(w, ctx, Object.assign({}, opts, { only: QE.SENTENCE_ORDER }));
     // V128: câu luyện thêm do KẾ HOẠCH (kỹ năng tụt lại ở mức người học) → nói rõ lý do, chỉ khi câu dựng được ĐÚNG kỹ năng đó.
     if (q && item.fromPlan && item.targetSkill && q.skill === item.targetSkill && RV_SKILL_NAME[item.targetSkill]) {

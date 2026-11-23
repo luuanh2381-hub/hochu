@@ -151,6 +151,18 @@ let convoFrom = 'list';          // chi tiết được mở từ đâu: 'list' 
 let convoReviewFilter = 'draft'; // tab đang xem ở màn Duyệt: draft | pending | ready | failed
 let convoOnlyFav = false;        // lọc "★ Yêu thích" (lọc phía trình duyệt trên danh sách đã tải)
 let convoLastList = [];          // danh sách đã tải gần nhất
+let convoRoleplay = 'off';       // chế độ Đóng vai / Shadowing: 'off' | 'a' (ẩn nhân vật 1) | 'b' (ẩn nhân vật 2)
+let convoRevealedTurns = new Set();
+
+function convoSetRoleplay(mode) {
+  convoRoleplay = (mode === 'a' || mode === 'b') ? mode : 'off';
+  convoRevealedTurns = new Set();
+  convoRedrawDetail();
+}
+function convoRevealTurn(index) {
+  convoRevealedTurns.add(Number(index));
+  convoRedrawDetail();
+}
 
 const cvNum = (n) => Number(n) || 0;
 const CV_IC = {
@@ -217,6 +229,12 @@ function renderConvoDetail(convo) {
       <span class="cv-chip-txt">${turns.length} lượt${turns.length ? ` · đã nghe ${done}/${turns.length}` : ''}</span>
     </div>
 
+    ${!reviewMode && turns.length ? `<div class="cv-seg" role="group" aria-label="Chế độ đóng vai" style="margin-bottom:10px">
+      <button type="button" class="cv-seg-btn${convoRoleplay === 'off' ? ' is-on' : ''}" onclick="convoSetRoleplay('off')">Đọc đầy đủ</button>
+      <button type="button" class="cv-seg-btn${convoRoleplay === 'a' ? ' is-on' : ''}" onclick="convoSetRoleplay('a')">🎭 Đóng vai A</button>
+      <button type="button" class="cv-seg-btn${convoRoleplay === 'b' ? ' is-on' : ''}" onclick="convoSetRoleplay('b')">🎭 Đóng vai B</button>
+    </div>` : ''}
+
     ${reviewMode ? convoAdminBar(convo) : ''}
 
     <div class="cv-situation"><span class="cv-situation-k">Tình huống</span>${escapeHtml(convo.situation || 'Không có mô tả tình huống')}</div>
@@ -254,14 +272,18 @@ function renderConvoTurn(convo, turn, index) {
   if (showExplain && turn.vocabulary_explanations) explain.push(`<div class="cv-ex-row"><span class="cv-ex-k">Từ vựng</span><span>${convoFmtExplain(turn.vocabulary_explanations, 'v', true)}</span></div>`);
   if (showExplain && turn.grammar_explanations) explain.push(`<div class="cv-ex-row"><span class="cv-ex-k">Ngữ pháp</span><span>${convoFmtExplain(turn.grammar_explanations, 'g')}</span></div>`);
 
-  return `<div id="convo-turn-${index}" class="cv-turn cv-side-${side}${isCompleted ? ' is-done' : ''}">
+  const masked = !reviewMode && convoRoleplay === side && !convoRevealedTurns.has(index);
+  return `<div id="convo-turn-${index}" class="cv-turn cv-side-${side}${isCompleted ? ' is-done' : ''}${masked ? ' is-roleplay' : ''}">
     <span class="cv-avatar" aria-hidden="true">${avatar}</span>
     <div class="cv-bubble">
-      <div class="cv-who">${escapeHtml(turn.character)} · lượt ${index + 1}${isCompleted ? ' <span class="cv-tick" title="Đã nghe">✓</span>' : ''}</div>
-      <div class="cv-zh">${escapeHtml(turn.chinese_text)}</div>
-      ${showPinyin ? `<div class="cv-py">${escapeHtml(turn.pinyin)}</div>` : ''}
-      ${showVi ? `<div class="cv-vi">${escapeHtml(turn.vietnamese_text)}</div>` : ''}
-      ${explain.length ? `<div class="cv-ex">${explain.join('')}</div>` : ''}
+      <div class="cv-who">${escapeHtml(turn.character)} · lượt ${index + 1}${isCompleted ? ' <span class="cv-tick" title="Đã nghe">✓</span>' : ''}${masked ? ' · <b>Lượt của bạn</b>' : ''}</div>
+      ${masked
+        ? `<div class="cv-vi" style="font-weight:700;margin-top:2px">🗣️ Hãy thử nói: “${escapeHtml(turn.vietnamese_text || '...')}”</div>
+           <div style="margin-top:8px"><button type="button" class="cv-play" onclick="convoRevealTurn(${index})">👁 Hiện chữ Hán &amp; Pinyin</button></div>`
+        : `<div class="cv-zh">${escapeHtml(turn.chinese_text)}</div>
+           ${showPinyin ? `<div class="cv-py">${escapeHtml(turn.pinyin)}</div>` : ''}
+           ${showVi ? `<div class="cv-vi">${escapeHtml(turn.vietnamese_text)}</div>` : ''}
+           ${explain.length ? `<div class="cv-ex">${explain.join('')}</div>` : ''}`}
       <div class="cv-tools">
         <button type="button" class="cv-play" onclick="convoPlayTurn(currentConvo, ${index})" aria-label="Phát lượt ${index + 1}">${CV_IC.speaker}<span>Nghe</span></button>
         <select class="cv-voice" aria-label="Giọng đọc lượt ${index + 1}" onchange="convoSetVoice(currentConvo, ${index}, this.value)">
@@ -380,6 +402,8 @@ async function loadConvoDetail(dialogueId, from) {
 
   currentConvo = convo;
   currentConvoId = convo.id;
+  convoRoleplay = 'off';
+  convoRevealedTurns = new Set();
 
   const el = document.getElementById('content');
   if (el) el.innerHTML = renderConvoDetail(convo);
