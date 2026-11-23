@@ -132,11 +132,14 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     ssCheckDayRollover(); // V77 (Study Day/Study Session): app mở qua đêm không đóng tab -> tự chuyển đúng "ngày học" mới
     flushReviewOutbox();
+    if (typeof sqSyncFromServer === 'function') sqSyncFromServer(false); // Đồng bộ phiên học mới hơn từ thiết bị khác (nếu có)
     // V112: quay lại → nối phiên rồi gửi 1 heartbeat "đồng bộ lại" (activeSeconds ≈ phần còn dư trước khi ẩn, KHÔNG gồm thời gian
     // vắng) để server dời mốc thời gian mà không cộng khoảng vắng mặt vào lượt trả lời kế tiếp.
     if (isStudyContext()) Promise.resolve(ensureStudySession()).then(() => sendStudyHeartbeat({ force: true }));
-  } else if (isStudyContext()) {
-    leaveStudyContext(true); // báo NỐT giây học thực chưa gửi (keepalive) rồi dừng đếm
+  } else {
+    if (isStudyContext()) leaveStudyContext(true); // báo NỐT giây học thực chưa gửi (keepalive) rồi dừng đếm
+    if (typeof sqFlushSnapshotSync === 'function') sqFlushSnapshotSync(true);
+    if (typeof flushProgressSyncKeepalive === 'function') flushProgressSyncKeepalive();
   }
 });
 // Đóng tab/đóng app/điều hướng đi nơi khác: gửi 1 heartbeat cuối cùng (keepalive để sống sót qua lúc
@@ -152,6 +155,9 @@ window.addEventListener('pagehide', () => {
       }).catch(() => {});
     } catch {}
   }
+  // Đẩy nốt snapshot phiên đang học + cài đặt UI (nếu còn trong debounce 700ms) trước khi đóng trang.
+  if (typeof sqFlushSnapshotSync === 'function') sqFlushSnapshotSync(true);
+  if (typeof flushProgressSyncKeepalive === 'function') flushProgressSyncKeepalive();
   // FIX (Bug 1 — "có flush trước unload"): cố gắng gửi NỐT mọi review còn kẹt trong outbox ngay lúc
   // trang bị đóng/điều hướng đi (vd review vừa write-ahead vào outbox nhưng fetch() gốc trong
   // _submitFsrsReviewImpl chưa kịp xong). Best-effort — KHÔNG await (unload có thể huỷ context
@@ -364,18 +370,19 @@ const REPEAT_GAP = 10; // N: số thẻ tối thiểu trước khi 1 thẻ bị 
 // (todayKey()) — "đã hoàn thành hôm nay" sống suốt CẢ NGÀY, qua mọi lần đóng/mở app, qua MỌI Study
 // Session trong ngày (sáng/trưa/tối — đúng Yêu cầu 3/4), chỉ tự hết hiệu lực khi sang ngày mới
 // (khoá đổi theo ngày -> set của ngày mới rỗng, không cần dọn tay).
+// Ngày lịch theo múi giờ Việt Nam (UTC+7 / Asia/Ho_Chi_Minh) — đồng nhất tuyệt đối với server
+// (lib/study-days.js, lib/session-snapshot.js) dù người học đang ở múi giờ khác.
 function todayKey() {
-  const d = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
 }
 function sessionKnownHzStoreKey() { return 'dayKnownHz_' + todayKey() + '_' + (authUsername || ''); }
 function loadSessionKnownHz() {
   try { return new Set(JSON.parse(localStorage.getItem(sessionKnownHzStoreKey()) || '[]')); }
   catch { return new Set(); }
 }
-function saveSessionKnownHz() {
+function saveSessionKnownHz(skipRemote) {
   try { localStorage.setItem(sessionKnownHzStoreKey(), JSON.stringify([...sessionKnownHz])); } catch {}
+  if (!skipRemote && typeof sqMarkDayKnownDirty === 'function') sqMarkDayKnownDirty();
 }
 let sessionKnownHz = loadSessionKnownHz(); // V77: hz đã hoàn thành (trả lời ĐÚNG) ở BẤT KỲ tab/Study Session nào trong ĐÚNG Study Day hôm nay
 let _sessionKnownHzDay = todayKey();
@@ -454,14 +461,156 @@ function ssGetDayLog(mode) {
 // cũ khi mở lại trang thay vì luôn tạo session mới. Hết hạn sau SQ_SESSION_MAX_AGE_MS để không "hồi
 // sinh" một session bỏ dở quá lâu (lúc đó thẻ due/mới trên server có thể đã khác nhiều).
 // ════════════════════════════════════════════════════
-const SQ_SESSION_MAX_AGE_MS = 45 * 60 * 1000; // 45 phút
+// Giữ phiên dang dở suốt cả Study Day (theo giờ Việt Nam) — không còn tự xoá im lặng sau 45 phút.
+// Vẫn có trần 24 giờ và kiểm tra dayKey !== todayKey() để tự làm mới khi sang ngày học mới.
+const SQ_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SQ_REVALIDATE_MAX_WAIT_MS = 1500;
+const SQ_REVALIDATE_SKEW_MS = 60 * 1000;
+
+let _sqPendingSync = {};
+let _sqDayKnownDirty = false;
+let _sqSyncTimer = null;
+let _sqHydratePromise = null;
+let _sqHydratedAt = 0;
+
+function sqResetRemoteSync() {
+  _sqPendingSync = {};
+  _sqDayKnownDirty = false;
+  if (_sqSyncTimer) { clearTimeout(_sqSyncTimer); _sqSyncTimer = null; }
+  _sqHydratePromise = null;
+  _sqHydratedAt = 0;
+}
+
+function sqMarkDayKnownDirty() {
+  if (!authToken || !authUsername) return;
+  _sqDayKnownDirty = true;
+  if (_sqSyncTimer) clearTimeout(_sqSyncTimer);
+  _sqSyncTimer = setTimeout(() => { _sqSyncTimer = null; sqFlushSnapshotSync(false); }, 650);
+}
+
+function sqScheduleSnapshotSync(mode, sessionPayload, clear) {
+  if (!authToken || !authUsername || !mode) return;
+  _sqPendingSync[mode] = {
+    mode,
+    session: clear ? null : sessionPayload,
+    clear: !!clear,
+    savedAt: (sessionPayload && sessionPayload.savedAt) || Date.now(),
+  };
+  if (_sqSyncTimer) clearTimeout(_sqSyncTimer);
+  _sqSyncTimer = setTimeout(() => { _sqSyncTimer = null; sqFlushSnapshotSync(false); }, 650);
+}
+
+function sqCompactForKeepalive(bodyObj) {
+  let json = JSON.stringify(bodyObj);
+  if (json.length <= 58000) return json;
+  // Rút gọn extra.log nếu phiên quá dài để vừa giới hạn 64KB của fetch keepalive.
+  if (bodyObj.session && bodyObj.session.extra && Array.isArray(bodyObj.session.extra.log)) {
+    const slim = Object.assign({}, bodyObj, {
+      session: Object.assign({}, bodyObj.session, {
+        extra: Object.assign({}, bodyObj.session.extra, { log: bodyObj.session.extra.log.slice(-25) }),
+      }),
+    });
+    json = JSON.stringify(slim);
+  }
+  return json.length <= 60000 ? json : null;
+}
+
+function sqFlushSnapshotSync(useKeepalive) {
+  if (!authToken || !authUsername) return;
+  if (_sqSyncTimer) { clearTimeout(_sqSyncTimer); _sqSyncTimer = null; }
+  const entries = Object.values(_sqPendingSync);
+  const sendKnown = _sqDayKnownDirty;
+  if (!entries.length && !sendKnown) return;
+  _sqPendingSync = {};
+  _sqDayKnownDirty = false;
+  const knownArr = sendKnown ? [...sessionKnownHz] : undefined;
+  const sendOne = (bodyObj) => {
+    try {
+      const bodyStr = useKeepalive ? sqCompactForKeepalive(bodyObj) : JSON.stringify(bodyObj);
+      if (!bodyStr) return;
+      fetch('/api/study/session/snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: bodyStr,
+        keepalive: !!useKeepalive,
+        noRetry: true,
+      }).catch(() => {});
+    } catch {}
+  };
+  if (!entries.length) {
+    sendOne({ dayKnown: knownArr });
+    return;
+  }
+  entries.forEach((entry, idx) => {
+    const body = idx === 0 && knownArr ? Object.assign({}, entry, { dayKnown: knownArr }) : entry;
+    sendOne(body);
+  });
+}
+
+function sqSyncFromServer(force) {
+  if (!authToken || !authUsername) return Promise.resolve(false);
+  if (!force && _sqHydratePromise) return _sqHydratePromise;
+  if (!force && _sqHydratedAt && (Date.now() - _sqHydratedAt < 25000)) return Promise.resolve(true);
+  const p = (async () => {
+    try {
+      const res = await fetch('/api/study/session/snapshot', { headers: authHeaders(), noRetry: true });
+      const d = await res.json().catch(() => null);
+      if (!d || !d.ok) return false;
+      const today = todayKey();
+      if (d.dayKey && d.dayKey !== today) return false;
+      // 1. Gộp danh sách từ đã hoàn thành hôm nay từ máy khác
+      if (Array.isArray(d.dayKnown) && d.dayKnown.length) {
+        let changed = false;
+        for (const hz of d.dayKnown) {
+          if (typeof hz === 'string' && hz && !sessionKnownHz.has(hz)) {
+            sessionKnownHz.add(hz);
+            changed = true;
+            sqPurgeHzFromAllQueues(hz);
+          }
+        }
+        if (changed) saveSessionKnownHz(true);
+      }
+      // 2. Đồng bộ từng phiên dang dở theo savedAt mới nhất
+      if (d.sessions && typeof d.sessions === 'object') {
+        for (const [mode, remote] of Object.entries(d.sessions)) {
+          if (!remote || typeof remote !== 'object') continue;
+          const key = sqStorageKey(mode);
+          let local = null;
+          try { local = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
+          const localAt = (local && Number.isFinite(Number(local.savedAt))) ? Number(local.savedAt) : 0;
+          const remoteAt = Number.isFinite(Number(remote.savedAt)) ? Number(remote.savedAt) : 0;
+          if (remote.cleared) {
+            if (remoteAt >= localAt) { try { localStorage.removeItem(key); } catch {} }
+          } else if (remote.sessionId && Array.isArray(remote.items) && remoteAt > localAt) {
+            try { localStorage.setItem(key, JSON.stringify(remote)); } catch {}
+          }
+        }
+      }
+      _sqHydratedAt = Date.now();
+      return true;
+    } catch { return false; }
+    finally { if (_sqHydratePromise === p) _sqHydratePromise = null; }
+  })();
+  _sqHydratePromise = p;
+  return p;
+}
+
+async function sqEnsureSynced(maxWaitMs = 1200) {
+  if (!authToken || !authUsername) return;
+  const job = _sqHydratePromise || (!_sqHydratedAt ? sqSyncFromServer(false) : null);
+  if (!job) return;
+  let timer;
+  try {
+    await Promise.race([job, new Promise((r) => { timer = setTimeout(r, maxWaitMs); })]);
+  } finally { if (timer) clearTimeout(timer); }
+}
 
 function sqStorageKey(mode) { return 'sqState_' + mode + '_' + (authUsername || ''); }
 
 function sqPersist(mode, sq, extra) {
   if (!authUsername) return;
   try {
-    localStorage.setItem(sqStorageKey(mode), JSON.stringify({
+    const payload = {
       sessionId: sq.sessionId,
       items: sq.items,
       doneHz: [...sq.doneHz],
@@ -477,11 +626,14 @@ function sqPersist(mode, sq, extra) {
       savedAt: Date.now(),
       graded: sq.graded || null, // V179: thẻ vừa chấm & ghi lên server nhưng CHƯA sang câu kế — khôi phục sẽ không hỏi/chấm lại thẻ đó
       extra: extra || {},
-    }));
+    };
+    localStorage.setItem(sqStorageKey(mode), JSON.stringify(payload));
+    if (typeof sqScheduleSnapshotSync === 'function') sqScheduleSnapshotSync(mode, payload, false);
   } catch {}
 }
 function sqClearPersisted(mode) {
   try { localStorage.removeItem(sqStorageKey(mode)); } catch {}
+  if (typeof sqScheduleSnapshotSync === 'function') sqScheduleSnapshotSync(mode, null, true);
 }
 function sqReadPersisted(mode) {
   if (!authUsername) return null;
@@ -499,28 +651,92 @@ function sqReadPersisted(mode) {
     return saved;
   } catch { return null; }
 }
-// Khôi phục session đã lưu VÀO ĐÚNG object hàng đợi (sq) truyền vào — lọc lại bằng sessionKnownHz
-// phòng trường hợp bản lưu đã CŨ hơn 1 lượt "trả lời đúng ở tab khác" xảy ra sau khi lưu (v.d. tab
-// này chưa kịp render/persist lại sau khi bị sqPurgeHzFromAllQueues sửa ở tab khác) — những thẻ bị
-// lọc ra vì lý do đó được tính luôn vào answeredCount (coi như đã xong, tránh lệch tổng số).
+
+// V179 mở rộng cho 4 tab luyện tập (flash/quiz/type/listen): đánh dấu thẻ đầu hàng ĐÃ CHẤM & gửi outbox
+// ngay trước khi chờ khoảng nghỉ 1.4s-1.6s, để thoát tab giữa chừng không bị hỏi & chấm FSRS lần 2.
+function sqMarkGraded(mode, sq, word, isCorrect, extra) {
+  if (!sq || !word || !sq.items || sq.items[0] !== word) return;
+  sq.graded = { hz: word.hz, l: word.l, correct: !!isCorrect, at: Date.now(), sid: sq.sessionId };
+  sqPersist(mode, sq, extra);
+}
+
+async function sqFetchReviewedElsewhere(words, startMs) {
+  let timer;
+  try {
+    if (!authToken || !Array.isArray(words) || !words.length) return new Set();
+    const hzs = [...new Set(words.map(w => w && (w.hz || (w.word && w.word.hz))).filter(Boolean))].slice(0, 200);
+    if (!hzs.length) return new Set();
+    const since = Math.max(0, (startMs || Date.now()) - SQ_REVALIDATE_SKEW_MS);
+    const cards = hzs.map(h => encodeURIComponent(h)).join(',');
+    const res = await Promise.race([
+      fetch('/api/study/session/reviewed-since?since=' + since + '&cards=' + encodeURIComponent(cards), { headers: authHeaders(), noRetry: true }),
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timeout')), SQ_REVALIDATE_MAX_WAIT_MS); }),
+    ]);
+    const d = await res.json();
+    return (d && d.ok && Array.isArray(d.reviewed)) ? new Set(d.reviewed) : new Set();
+  } catch { return new Set(); } finally { if (timer) clearTimeout(timer); }
+}
+
+// Khôi phục session đã lưu VÀO ĐÚNG object hàng đợi (sq) truyền vào — áp dấu `graded` (nếu có) và lọc lại
+// bằng sessionKnownHz phòng trường hợp bản lưu đã CŨ hơn 1 lượt "trả lời đúng ở tab/máy khác".
 function sqRestoreIntoQueue(mode, sq) {
   const saved = sqReadPersisted(mode);
   if (!saved || !saved.items.length) return null;
-  const filteredItems = saved.items.filter(w => !sessionKnownHz.has((w.hz || (w.word && w.word.hz))));
-  const purged = saved.items.length - filteredItems.length;
-  if (!filteredItems.length) return null;
+  let items = saved.items.slice();
+  let answeredCount = saved.answeredCount || 0;
+  const doneHz = new Set(Array.isArray(saved.doneHz) ? saved.doneHz : []);
+  const completedCards = Array.isArray(saved.completedCards) ? saved.completedCards.slice() : [];
+  const g = saved.graded;
+  const w0 = items[0];
+  const w0Hz = w0 && (w0.hz || (w0.word && w0.word.hz));
+  if (g && w0 && w0Hz === g.hz && (!g.sid || g.sid === saved.sessionId)) {
+    items.shift();
+    answeredCount += 1;
+    completedCards.push({ hz: g.hz, l: g.l, correct: g.correct === true, at: g.at || Date.now() });
+    if (g.correct === true) {
+      doneHz.add(g.hz);
+      sessionKnownHz.add(g.hz);
+      saveSessionKnownHz();
+      sqPurgeHzFromAllQueues(g.hz);
+    } else {
+      const pos = Math.min(REPEAT_GAP, items.length);
+      items.splice(pos, 0, w0);
+    }
+  }
+  const filteredItems = items.filter(w => !sessionKnownHz.has((w.hz || (w.word && w.word.hz))));
+  const purged = items.length - filteredItems.length;
+  if (!filteredItems.length) { sqClearPersisted(mode); return null; }
   sq.items = filteredItems;
-  sq.doneHz = new Set(saved.doneHz);
+  sq.doneHz = doneHz;
   sq.totalPlanned = saved.totalPlanned;
-  sq.answeredCount = saved.answeredCount + purged;
+  sq.answeredCount = answeredCount + purged;
   sq.sessionId = saved.sessionId;
+  sq.graded = null;
   // V77 (Yêu cầu 5/6): khôi phục ĐỦ các field của Study Session, không chỉ riêng hàng đợi.
   sq.startTime = saved.startTime || Date.now();
   sq.endTime = null;
-  sq.completedCards = Array.isArray(saved.completedCards) ? saved.completedCards : [];
+  sq.completedCards = completedCards;
   sq.lessonFilter = saved.lessonFilter || sqSnapshotLessonFilter();
   sq.dayKey = saved.dayKey || todayKey();
   return saved.extra || {};
+}
+
+// Khôi phục bất đồng bộ cho 4 tab luyện tập: đợi đồng bộ từ server (nếu vừa đổi thiết bị), khôi phục
+// hàng đợi (áp `graded`), rồi hỏi `/api/study/session/reviewed-since` để bỏ thẻ đã ôn ở máy khác.
+async function sqRestoreAndRevalidate(mode, sq) {
+  await sqEnsureSynced(1200);
+  const extra = sqRestoreIntoQueue(mode, sq);
+  if (!extra) return null;
+  if (!sqLessonFilterMatches(sq.lessonFilter)) { sqClearPersisted(mode); return null; }
+  const reviewedHz = await sqFetchReviewedElsewhere(sq.items, sq.startTime);
+  if (reviewedHz.size) {
+    const before = sq.items.length;
+    sq.items = sq.items.filter(w => !reviewedHz.has(w && (w.hz || (w.word && w.word.hz))));
+    sq.answeredCount += (before - sq.items.length);
+    if (!sq.items.length) { sqClearPersisted(mode); return null; }
+    sqPersist(mode, sq, extra);
+  }
+  return extra;
 }
 
 // FIX (Bug 2 gốc — đổi số câu/số thẻ reset toàn bộ tiến trình): thay vì sqLoad() lại từ đầu (huỷ
@@ -713,12 +929,19 @@ async function sqRelearnFromStart(mode, sq, limit) {
 // (Yêu cầu 2) thay vì tự động resume/ghi đè ngầm.
 function sqHasDanglingSession(mode) {
   const saved = sqReadPersisted(mode);
-  return !!(saved && saved.items && saved.items.length > 0 && saved.answeredCount > 0 && sqLessonFilterMatches(saved.lessonFilter));
+  if (!saved || !saved.items || !saved.items.length || !sqLessonFilterMatches(saved.lessonFilter)) return false;
+  // Nếu thẻ duy nhất còn lại đã được chấm (`graded`) thì coi như phiên đã hết, không hiện nút tiếp tục rỗng.
+  const g = saved.graded;
+  const firstHz = saved.items[0] && (saved.items[0].hz || (saved.items[0].word && saved.items[0].word.hz));
+  const effLeft = (g && firstHz === g.hz && (!g.sid || g.sid === saved.sessionId)) ? saved.items.length - 1 : saved.items.length;
+  const effDone = (saved.answeredCount || 0) + ((g && firstHz === g.hz) ? 1 : 0);
+  return effLeft > 0 && effDone > 0;
 }
 
 // Gọi SAU KHI có kết quả (kết quả server) cho thẻ đang ở ĐẦU hàng đợi.
 function sqAdvance(sq, isCorrect) {
   const w = sq.items.shift();
+  sq.graded = null;
   if (!w) return;
   sq.answeredCount++;
   // V77 (Yêu cầu 5 — completedCards): tích luỹ đúng danh sách thẻ đã hoàn thành của Study Session

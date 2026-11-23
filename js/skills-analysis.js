@@ -7,7 +7,12 @@
 // Mọi dữ liệu do server tính; file này chỉ hiển thị. Mọi chuỗi từ server/dữ liệu đều qua escapeHtml.
 
 const SA_MIN_N = 10; // khớp MIN_RETENTION_N ở lib/skills.js (chỉ dùng để giải thích cho người học)
-let saState = { recs: null, retention: null, learner: null, loadedAt: 0, error: null, word: null, wordLoading: false, wordError: null };
+let saState = { recs: null, retention: null, learner: null, insights: null, loadedAt: 0, error: null, word: null, wordLoading: false, wordError: null };
+
+function saLaunchTodayForSkill(skill) {
+  if (typeof tdStartAdaptiveMode === 'function') { tdStartAdaptiveMode(skill); return; }
+  if (typeof ssEnterMode === 'function') ssEnterMode('review');
+}
 
 const SA_LEVEL = {
   insufficient: { text: 'Chưa đủ dữ liệu', cls: 'sa-lv-none' },
@@ -121,12 +126,13 @@ function saRenderToneDiagnosis(word, history) {
 // ── Tải dữ liệu phụ (song song, KHÔNG chặn phần chính; lỗi chỉ làm mất các khối này) ─────────────────
 async function saLoadExtras() {
   try {
-    const [recs, retention, learner] = await Promise.all([
+    const [recs, retention, learner, insights] = await Promise.all([
       skFetchJson('/api/skills/recommendations?days=90'),
       skFetchJson('/api/skills/retention?days=90'),
       skFetchJson('/api/skills/learner').catch(() => null), // V128: phần phụ — máy chủ cũ/lỗi chỉ làm mất khối "Kế hoạch ưu tiên", không làm mất các khối khác
+      skFetchJson('/api/skills/insights?days=90').catch(() => null), // Phân tích chuyên sâu (ma trận thanh điệu, khung giờ vàng, tổng kết tuần, 3 tầng ổn định)
     ]);
-    saState.recs = recs; saState.retention = retention; saState.learner = (learner && learner.learner) || null; saState.error = null; saState.loadedAt = Date.now();
+    saState.recs = recs; saState.retention = retention; saState.learner = (learner && learner.learner) || null; saState.insights = (insights && insights.ok) ? insights : null; saState.error = null; saState.loadedAt = Date.now();
   } catch (e) { saState.error = e.message; }
   if (currentTab === 'skills' && !skState.practice && !saState.word) render();
 }
@@ -136,15 +142,150 @@ async function saLoadExtras() {
 function saRenderPlan() {
   if (typeof TP === 'undefined' || !saState.learner) return '';
   try {
-    const d = TP.describe(TP.build(saState.learner, { typedEnabled: typeof rvTypedEnabled === 'function' ? rvTypedEnabled() : true }));
+    const plan = TP.build(saState.learner, { typedEnabled: typeof rvTypedEnabled === 'function' ? rvTypedEnabled() : true });
+    const d = TP.describe(plan);
     if (!d.headline) return '';
     const rows = d.rows.map(r => `<div class="sa-brow"><span class="sa-blbl">${escapeHtml(r.label)}</span><span style="flex:1">${escapeHtml(r.text)}</span></div>`).join('');
+    const top = plan.priorities && plan.priorities[0];
+    const jumpBtn = top ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn btn-sm btn-primary" ${top.skill === 'listening' && !skAudioOk() ? 'disabled' : `onclick="saLaunchTodayForSkill('${escapeJsAttr(top.skill)}')"`}>🎯 Vào Hôm nay học (${escapeHtml(top.label)})</button>
+      <button class="btn btn-sm" ${top.skill === 'listening' && !skAudioOk() ? 'disabled' : `onclick="skStartPractice('${escapeJsAttr(top.skill)}')"`}>Luyện bổ sung ngay</button>
+    </div>` : '';
     return `<div class="panel"><div class="panel-title">🎯 Kế hoạch ưu tiên hôm nay</div>
       <div style="font-weight:800;margin-bottom:4px">${escapeHtml(d.headline)}</div>
       ${d.lines.map(l => `<div class="sa-note" style="margin:2px 0">${escapeHtml(l)}</div>`).join('')}
       <div style="margin-top:8px">${rows}</div>
-      <div class="sa-note">${escapeHtml(d.note)} Đây cũng chính là số liệu mà màn "Hôm nay học" dùng để chọn dạng câu hỏi.</div></div>`;
+      ${jumpBtn}
+      <div class="sa-note">${escapeHtml(d.note)} Đây cũng chính là số liệu mà màn "Hôm nay học" và "Trắc nghiệm thích ứng" đang dùng.</div></div>`;
   } catch { return ''; }
+}
+
+// ── Phân tích chuyên sâu: Tổng kết tuần · Ma trận thanh điệu 4×4 · 4 Nguyên nhân sai · Bộ thủ hay quên · Khung giờ vàng · 3 tầng độ vững ──
+function saRenderWeakRadicals() {
+  const weak = (typeof skState !== 'undefined' && Array.isArray(skState.weak)) ? skState.weak : [];
+  const partsDb = (typeof dbHanziParts !== 'undefined' && dbHanziParts) ? dbHanziParts : {};
+  if (!weak.length || !Object.keys(partsDb).length) return '';
+  const byRad = new Map();
+  const seenWord = new Set();
+  for (const w of weak) {
+    if (!w || !w.hz || seenWord.has(w.hz)) continue;
+    seenWord.add(w.hz);
+    for (const ch of [...String(w.hz)]) {
+      const info = partsDb[ch];
+      const comps = Array.isArray(info) ? info : (info && Array.isArray(info.parts) ? info.parts : []);
+      for (const c of comps) {
+        const rad = typeof c === 'string' ? c : (c && (c.part || c.char || c.rad || c.hz));
+        const mean = c && typeof c === 'object' ? (c.meaning || c.vi || c.mean || '') : '';
+        if (!rad || rad === ch) continue;
+        const slot = byRad.get(rad) || { rad, mean, words: [] };
+        if (!slot.words.includes(w.hz)) slot.words.push(w.hz);
+        byRad.set(rad, slot);
+      }
+    }
+  }
+  const top = [...byRad.values()].filter(x => x.words.length >= 2).sort((a, b) => b.words.length - a.words.length).slice(0, 5);
+  if (!top.length) return '';
+  return `<div class="panel"><div class="panel-title">🧱 Bộ thủ &amp; thành phần xuất hiện nhiều trong từ yếu</div>
+    ${top.map(x => `<div class="sa-brow" style="align-items:flex-start"><span class="gf-rad-chip">${escapeHtml(x.rad)}</span>
+      <div style="flex:1"><div><b>${x.words.length} từ yếu</b>${x.mean ? ` · <span style="color:var(--muted)">${escapeHtml(x.mean)}</span>` : ''}</div>
+      <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${x.words.slice(0, 6).map(h => `<button type="button" class="btn btn-sm" style="padding:3px 9px;min-height:28px" onclick="saOpenWord('${escapeJsAttr(h)}')">${escapeHtml(h)}</button>`).join('')}</div></div></div>`).join('')}
+    <div class="sa-note">Tổng hợp tự động từ chiết tự bộ thủ của các từ yếu hiện tại — chạm từng chữ để xem chi tiết và so sánh.</div></div>`;
+}
+
+function saRenderInsights() {
+  const ins = saState.insights;
+  const radHtml = saRenderWeakRadicals();
+  if (!ins) return radHtml;
+  const blocks = [];
+
+  // 1) Tổng kết tuần & Từ cứng đầu đã chinh phục
+  if (ins.weekly) {
+    const w1 = ins.weekly.thisWeek || {}, w0 = ins.weekly.prevWeek || {};
+    const diffRev = (w1.reviews || 0) - (w0.reviews || 0);
+    const diffTxt = w0.reviews ? ` (${diffRev >= 0 ? '+' : ''}${diffRev} so với tuần trước)` : '';
+    const conq = (ins.weekly.conquered || []).map(x => `<button type="button" class="btn btn-sm" style="padding:4px 10px;min-height:30px" onclick="saOpenWord('${escapeJsAttr(x.hz)}')"><b>${escapeHtml(x.hz)}</b> <span style="color:var(--muted)">${escapeHtml(x.vi || '')}</span></button>`).join('');
+    blocks.push(`<div class="panel"><div class="panel-title">🏆 Tổng kết tuần &amp; Từ đã chinh phục</div>
+      <div class="gf-insight-grid">
+        <div class="dash-kpi"><div class="dash-kpi-num">${w1.reviews || 0}</div><div class="dash-kpi-lbl">Lượt ôn 7 ngày${escapeHtml(diffTxt)}</div></div>
+        <div class="dash-kpi"><div class="dash-kpi-num">${w1.accuracy != null ? w1.accuracy + '%' : '—'}</div><div class="dash-kpi-lbl">Tỉ lệ đúng tuần này${w0.accuracy != null ? ` (tuần trước ${w0.accuracy}%)` : ''}</div></div>
+      </div>
+      ${conq ? `<div style="font-size:.8rem;font-weight:800;margin:10px 0 6px">🌟 Từ từng hay quên đã nhớ lại trong tuần này:</div><div style="display:flex;gap:6px;flex-wrap:wrap">${conq}</div>` : `<div class="sa-note">Khi bạn nhớ lại được các từ từng quên nhiều lần, chúng sẽ xuất hiện ở đây để ghi nhận tiến bộ.</div>`}
+    </div>`);
+  }
+
+  // 2) Ma trận nhầm lẫn Thanh điệu 4×4
+  if (ins.toneMatrix && ins.toneMatrix.totalToneErrors > 0) {
+    const tm = ins.toneMatrix, m = tm.matrix || {};
+    const maxV = Math.max(1, ...Object.values(m));
+    const header = `<tr><th>Đúng \\ Chọn</th><th>T1 (ā)</th><th>T2 (á)</th><th>T3 (ǎ)</th><th>T4 (à)</th></tr>`;
+    const body = [1, 2, 3, 4].map(r => `<tr><th>T${r}</th>${[1, 2, 3, 4].map(c => {
+      if (r === c) return `<td class="gf-tm-diag">—</td>`;
+      const v = m[`${r}->${c}`] || 0;
+      const lvl = v === 0 ? 0 : (v >= maxV * 0.65 ? 3 : (v >= maxV * 0.3 ? 2 : 1));
+      return `<td class="gf-tm-c gf-tm-${lvl}">${v || ''}</td>`;
+    }).join('')}</tr>`).join('');
+    const tp = tm.topPair;
+    blocks.push(`<div class="panel"><div class="panel-title">🎵 Ma trận nhầm lẫn Thanh điệu 4×4</div>
+      ${tp ? `<div class="sa-rec" style="margin-top:0"><div class="sa-rec-t">Nhầm nhiều nhất: Thanh ${tp.expected} → nhầm sang Thanh ${tp.got} (${tp.count} lần · ${tp.sharePct}% lỗi thanh điệu)</div>
+        <div style="margin-top:6px"><button class="btn btn-sm btn-primary" ${!skAudioOk() ? 'disabled' : `onclick="skStartPractice('tone')"`}>🎵 Luyện nghe thanh điệu</button>
+        <button class="btn btn-sm" style="margin-left:6px" onclick="skStartPractice('tonevis')">👁 Luyện thanh bằng mắt</button></div></div>` : ''}
+      <table class="sa-table gf-tone-grid">${header}${body}</table>
+      <div class="sa-note">Hàng = thanh điệu đúng · Cột = thanh điệu bạn chọn/gõ sai (${ins.windowDays} ngày gần nhất, tổng ${tm.totalToneErrors} lỗi thanh).</div></div>`);
+  }
+
+  // 3) 4 Nguyên nhân gốc gây sai
+  if (ins.rootCauses && ins.rootCauses.total >= 5) {
+    const rc = ins.rootCauses;
+    const rows = [
+      ['tone', '🎵 Nhầm thanh điệu / Pinyin', rc.tone, 'tonevis', 'Luyện thanh điệu'],
+      ['visual', '✍️ Nhầm mặt chữ Hán', rc.visual, 'confusable', 'Phân biệt chữ dễ nhầm'],
+      ['semantic', '📖 Nhầm nghĩa gần', rc.semantic, 'duel', 'Luyện A hay B?'],
+      ['lapse', '⏳ Quên sau khoảng nghỉ', rc.lapse, 'delayed', 'Kiểm tra sau khoảng nghỉ'],
+    ].sort((a, b) => b[2] - a[2]);
+    const topCause = rows[0];
+    blocks.push(`<div class="panel"><div class="panel-title">🧩 Phân loại nguyên nhân trả lời sai</div>
+      ${rows.map(([, lb, n]) => {
+        const p = Math.round((n / rc.total) * 100);
+        return `<div class="sa-brow"><span class="sa-blbl">${lb}</span><div class="sa-bar-wrap"><div class="sa-bar-in" style="width:${Math.max(p, 2)}%"></div></div><span style="width:76px;text-align:right;font-weight:700">${p}% (${n})</span></div>`;
+      }).join('')}
+      ${topCause && topCause[2] > 0 ? `<div style="margin-top:8px"><button class="btn btn-sm" onclick="skStartPractice('${topCause[3]}')">🎯 Khắc phục nhóm lớn nhất: ${topCause[4]}</button></div>` : ''}
+      <div class="sa-note">Phân loại tự động từ ${rc.total} lượt sai trong ${ins.windowDays} ngày gần nhất.</div></div>`);
+  }
+
+  // 4) Bộ thủ hay quên (từ chiết tự)
+  if (radHtml) blocks.push(radHtml);
+
+  // 5) Khung giờ vàng học tập
+  if (Array.isArray(ins.timeOfDay)) {
+    const valid = ins.timeOfDay.filter(x => x.accuracy != null);
+    if (valid.length >= 2) {
+      const best = valid.slice().sort((a, b) => b.accuracy - a.accuracy)[0];
+      blocks.push(`<div class="panel"><div class="panel-title">⏰ Khung giờ vàng học tập</div>
+        <div class="sa-rec" style="margin-top:0"><div class="sa-rec-t">Bạn tập trung tốt nhất vào buổi ${escapeHtml(best.label)}: ${best.accuracy}% đúng (${best.n} lượt${best.avgMs ? ` · ~${(best.avgMs / 1000).toFixed(1)}s/câu` : ''})</div></div>
+        ${ins.timeOfDay.map(x => `<div class="sa-brow"><span class="sa-blbl">${escapeHtml(x.label)}</span>${x.accuracy != null
+          ? `<div class="sa-bar-wrap"><div class="sa-bar-in" style="width:${Math.max(x.accuracy, 2)}%"></div></div><span style="width:82px;text-align:right">${x.accuracy}% (${x.n})</span>`
+          : `<span class="sk-nodata">${x.n} lượt (cần ≥10)</span>`}</div>`).join('')}
+      </div>`);
+    }
+  }
+
+  // 6) 3 tầng độ vững & Dự báo hoàn thành phạm vi đang chọn
+  if (ins.mastery && ins.mastery.seen > 0) {
+    const m = ins.mastery;
+    const scopeTotal = (typeof WORDS !== 'undefined' && Array.isArray(WORDS) && typeof isLessonInSelection === 'function')
+      ? WORDS.filter(w => isLessonInSelection(w.l)).length : 0;
+    const remain = scopeTotal > m.seen ? (scopeTotal - m.seen) : 0;
+    const estDays = (remain > 0 && m.newPerDay14d >= 0.5) ? Math.ceil(remain / m.newPerDay14d) : null;
+    blocks.push(`<div class="panel"><div class="panel-title">📚 3 tầng độ vững FSRS &amp; Dự báo nhịp học</div>
+      <div class="td-summary" style="margin-top:4px">
+        <div class="td-sum-cell"><div class="td-sum-num">${m.seen}</div><div class="td-sum-lbl">Đã gặp</div></div>
+        <div class="td-sum-cell"><div class="td-sum-num">${m.steady}</div><div class="td-sum-lbl">Đang vững (≥7 ngày)</div></div>
+        <div class="td-sum-cell"><div class="td-sum-num">${m.mature}</div><div class="td-sum-lbl">Bền vững (≥21 ngày)</div></div>
+      </div>
+      <div class="sa-note">Nhịp 14 ngày gần đây: trung bình <b>${m.newPerDay14d} từ mới/ngày</b>.${estDays ? ` Với nhịp này, dự kiến phủ xong ${remain} từ còn lại trong phạm vi hiện chọn sau khoảng <b>${estDays} ngày</b>.` : ''}</div></div>`);
+  }
+
+  return blocks.join('');
 }
 
 // ── Khuyến nghị tổng thể ────────────────────────────────────────────────────────────────────────
@@ -153,7 +294,10 @@ function saActionButton(a) {
   if (a.kind === 'delayed') return `<button class="btn btn-sm" style="margin-top:6px" onclick="skStartPractice('delayed')">⏳ Kiểm tra sau khoảng nghỉ</button>`;
   if (a.kind === 'practice' && a.skill) {
     const disabled = a.skill === 'listening' && !skAudioOk();
-    return `<button class="btn btn-sm" style="margin-top:6px" ${disabled ? 'disabled' : `onclick="skStartPractice('${escapeJsAttr(a.skill)}')"`}>Luyện ngay · ${escapeHtml(a.hint || SK_LABEL[a.skill] || '')}</button>`;
+    return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <button class="btn btn-sm btn-primary" ${disabled ? 'disabled' : `onclick="saLaunchTodayForSkill('${escapeJsAttr(a.skill)}')"`}>🎯 Vào Hôm nay học</button>
+      <button class="btn btn-sm" ${disabled ? 'disabled' : `onclick="skStartPractice('${escapeJsAttr(a.skill)}')"`}>Luyện bổ sung · ${escapeHtml(a.hint || SK_LABEL[a.skill] || '')}</button>
+    </div>`;
   }
   return '';
 }
@@ -308,5 +452,5 @@ function saRenderWordDetail() {
 }
 
 function saResetState() {
-  saState = { recs: null, retention: null, learner: null, loadedAt: 0, error: null, word: null, wordLoading: false, wordError: null };
+  saState = { recs: null, retention: null, learner: null, insights: null, loadedAt: 0, error: null, word: null, wordLoading: false, wordError: null };
 }

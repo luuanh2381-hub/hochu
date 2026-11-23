@@ -14,21 +14,27 @@ const SS_TAB_OF_MODE = { flash: 'flash', quiz: 'quiz', type: 'type', listen: 'li
 
 // Home ("Bắt đầu học nhanh" / "Bắt đầu học" / "Luyện từ hay quên") gọi hàm này thay vì goTab()/
 // startStudySession() thẳng. mode: 'flash'|'quiz'|'type'|'listen'|'review'|'review-weak'.
-function ssEnterMode(mode) {
+async function ssEnterMode(mode) {
   if (!isLoggedIn()) { // chưa đăng nhập → không có Study Session FSRS thật để "dang dở" — vào thẳng như cũ
     if (mode === 'review' || mode === 'review-weak') startStudySession(mode === 'review-weak', false);
     else goTab(mode);
     return;
   }
+  // Đợi tối đa 1.2s để đồng bộ ảnh chụp phiên học từ thiết bị khác (nếu đang tải ngầm).
+  if (typeof sqEnsureSynced === 'function') await sqEnsureSynced(1200);
   const saved = sqReadPersisted(mode);
-  const dangling = !!(saved && saved.items && saved.items.length > 0 && saved.answeredCount > 0
-    && sqLessonFilterMatches(saved.lessonFilter));
+  const g = saved && saved.graded;
+  const firstHz = saved && saved.items && saved.items[0] && (saved.items[0].hz || (saved.items[0].word && saved.items[0].word.hz));
+  const headAlreadyGraded = !!(g && firstHz === g.hz && (!g.sid || g.sid === saved.sessionId));
+  const effLeft = saved && saved.items ? (saved.items.length - (headAlreadyGraded ? 1 : 0)) : 0;
+  const effDone = (saved ? (saved.answeredCount || 0) : 0) + (headAlreadyGraded ? 1 : 0);
+  const dangling = !!(saved && effLeft > 0 && effDone > 0 && sqLessonFilterMatches(saved.lessonFilter));
   if (!dangling) {
     if (mode === 'review' || mode === 'review-weak') startStudySession(mode === 'review-weak', false);
     else goTab(mode);
     return;
   }
-  ssRenderChooser(mode, saved);
+  ssRenderChooser(mode, Object.assign({}, saved, { answeredCount: effDone, _effLeft: effLeft }));
 }
 
 // Cập nhật đúng phần "khung" mà goTab() vẫn làm (tab đang chọn, highlight nav, lưu lastTab) NHƯNG
@@ -51,7 +57,7 @@ function ssRenderChooser(mode, saved) {
   el.innerHTML = `
     <div class="panel center" style="padding:32px 20px">
       <div style="font-size:1.05rem;font-weight:800;margin-bottom:8px">${label}</div>
-      <div style="color:var(--muted);margin-bottom:18px">Bạn đang có 1 phiên học dang dở: đã học ${saved.answeredCount}, còn ${saved.items.length} từ trong hàng đợi.</div>
+      <div style="color:var(--muted);margin-bottom:18px">Bạn đang có 1 phiên học dang dở: đã học ${saved.answeredCount}, còn ${saved._effLeft != null ? saved._effLeft : saved.items.length} mục trong hàng đợi.</div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="ssResumeChoice('${mode}')">▶️ Học tiếp</button>
         <button class="btn" onclick="ssNewChoice('${mode}')">🆕 Học mới</button>

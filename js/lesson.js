@@ -163,9 +163,71 @@ async function loadStudyDashboard() {
     }
     // V110: KHÔNG thoát sớm khi hết thẻ/từ mới — người học vẫn cần thấy thống kê và các chế độ luyện bổ sung / kiểm tra lại.
     area.innerHTML = renderTodayPanel(data);
+    tdLoadAdaptiveBridge(); // nối Phân tích năng lực → Hôm nay học (chạy nền, không chặn hiển thị chính)
   } catch (e) {
     if (typeof showLoadError === 'function') showLoadError(e.message, loadStudyDashboard, { container: area, noHome: true }); else area.innerHTML = `<div class="study-empty">Lỗi kết nối: ${e.message}</div>`; // V175: nút Thử lại
   }
+}
+
+// Ánh xạ kỹ năng tụt lại → chế độ học chính thức (SMODE) tương ứng trong "Hôm nay học".
+function tdModeForSkill(skill) {
+  if (skill === 'listening') return 'listen';
+  if (skill === 'context') return 'translateRead';
+  if (skill === 'recall') return 'recall';
+  if (skill === 'recognition' || skill === 'pinyin') return 'basic';
+  return 'mix';
+}
+function tdStartAdaptiveMode(skill) {
+  const mode = tdModeForSkill(skill);
+  if (typeof rvSetMode === 'function') rvSetMode(mode);
+  if (typeof ssEnterMode === 'function') ssEnterMode('review');
+}
+function tdQuickSessionCap(val) {
+  if (typeof rvSetSentenceCount === 'function') rvSetSentenceCount(val);
+  invalidateTodayDashboardCache();
+  if (typeof render === 'function') render();
+}
+function tdApplyBacklogRescue() {
+  if (progressState && progressState.ui && !progressState.ui.newOnlyAfterDue) {
+    progressState.ui.newOnlyAfterDue = true;
+    cacheProgressLocally();
+    scheduleSync();
+  }
+  if (typeof rvSetSentenceCount === 'function') rvSetSentenceCount(15);
+  invalidateTodayDashboardCache();
+  if (typeof ssEnterMode === 'function') ssEnterMode('review');
+}
+async function tdLoadAdaptiveBridge() {
+  const slot = document.getElementById('td-adaptive-slot');
+  if (!slot || typeof TP === 'undefined' || !isLoggedIn()) return;
+  let learner = (typeof saState !== 'undefined' && saState && saState.learner) ? saState.learner : null;
+  if (!learner) {
+    try {
+      const r = await fetch('/api/skills/learner', { headers: authHeaders() }).then(x => x.json());
+      if (r && r.ok && r.learner) {
+        learner = r.learner;
+        if (typeof saState !== 'undefined' && saState) saState.learner = learner;
+      }
+    } catch { return; }
+  }
+  if (currentTab !== 'today' || !learner) return;
+  const live = document.getElementById('td-adaptive-slot');
+  if (!live) return;
+  const plan = TP.build(learner, { typedEnabled: typeof rvTypedEnabled === 'function' ? rvTypedEnabled() : true });
+  if (!plan || !plan.priorities || !plan.priorities.length) return;
+  const top = plan.priorities[0];
+  const modeId = tdModeForSkill(top.skill);
+  const modeObj = (typeof SMODE !== 'undefined') ? SMODE.get(modeId) : null;
+  const modeLabel = modeObj ? `${modeObj.icon} ${modeObj.label}` : 'Tổng hợp';
+  const audioBlocked = top.skill === 'listening' && typeof skillAudioAvailable === 'function' && !skillAudioAvailable();
+  live.innerHTML = `<div class="gf-bridge-card">
+    <div class="gf-bridge-head">🧭 Liên kết Phân tích năng lực</div>
+    <div class="gf-bridge-txt">Kỹ năng <b>${escapeHtml(top.label)}</b> đang thấp hơn mức giữa các kỹ năng khác khoảng <b>${Math.round(top.gap * 100)} điểm %</b>. Đề xuất học hôm nay theo chế độ <b>${escapeHtml(modeLabel)}</b> (vẫn tính FSRS chính thức).</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn btn-sm btn-primary" ${audioBlocked ? 'disabled' : `onclick="tdStartAdaptiveMode('${escapeJsAttr(top.skill)}')"`}>🎯 Học theo kỹ năng này</button>
+      <button class="btn btn-sm" onclick="goTab('skills')">📈 Xem phân tích</button>
+    </div>
+  </div>`;
 }
 
 // ── V110: bảng điều khiển học tập hằng ngày ─────────────────────────────────────────────────────
@@ -343,15 +405,31 @@ function renderTodayPanel(data) {
       ${unique}
       ${tdMemoryDetailHtml(mem)}
     </details>`;
+  const quickPace = !nothingToDo ? `<div class="gf-pace-row" role="group" aria-label="Chọn nhanh độ dài buổi học">
+      <span class="gf-pace-lbl">⏱ Quỹ thời gian:</span>
+      <button type="button" class="dash-chip${sessionCap === 6 ? ' sel' : ''}" onclick="tdQuickSessionCap(6)">⚡ Nhanh ~5p (6 thẻ)</button>
+      <button type="button" class="dash-chip${sessionCap === 15 ? ' sel' : ''}" onclick="tdQuickSessionCap(15)">🎯 Vừa ~10p (15 thẻ)</button>
+      <button type="button" class="dash-chip${sessionCap === 'all' ? ' sel' : ''}" onclick="tdQuickSessionCap('all')">🔥 Học hết</button>
+    </div>` : '';
+  const rescueDays = (dl && data.dueInScope >= (dl.reviewLimit || 50) * 2) ? Math.max(2, Math.ceil(data.dueInScope / Math.max(15, dl.reviewLimit || 40))) : 0;
+  const backlogRescue = rescueDays ? `<div class="gf-rescue-card">
+      <div style="font-weight:800;font-size:.86rem">🛟 Gợi ý gỡ tồn đọng nhẹ nhàng (${data.dueInScope} thẻ đến hạn)</div>
+      <div style="font-size:.76rem;color:var(--muted);margin-top:3px;line-height:1.45">Đừng cố học một mạch dễ nản — chia thành phiên ngắn <b>15 thẻ</b> và tạm ưu tiên ôn thẻ cũ trong khoảng <b>${rescueDays} ngày</b> là bắt kịp lịch FSRS.</div>
+      <button type="button" class="btn btn-sm" style="margin-top:8px" onclick="tdApplyBacklogRescue()">▶️ Bắt đầu phiên gỡ 15 thẻ</button>
+    </div>` : '';
+  const hasDanglingReview = (typeof sqHasDanglingSession === 'function') && sqHasDanglingSession('review');
   return `
     ${goalHtml}
     ${nothingToDo
-      ? `<div class="study-empty" style="margin:8px 0">🎉 Bạn đã ôn hết thẻ đến hạn và học hết từ mới của Bài ${escapeHtml(String(data.currentLesson))} hôm nay!<br><span style="font-size:.8rem">Muốn học thêm? Chọn một chế độ luyện bổ sung bên dưới, hoặc chọn thêm Quyển/bài ở Trang chủ.</span></div>`
-      : `<button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">▶️ Bắt đầu học</button>`}
+      ? `${hasDanglingReview ? `<button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;margin-bottom:8px;" onclick="ssEnterMode('review')">▶️ Tiếp tục phiên đang học</button>` : ''}<div class="study-empty" style="margin:8px 0">🎉 Bạn đã ôn hết thẻ đến hạn và học hết từ mới của Bài ${escapeHtml(String(data.currentLesson))} hôm nay!<br><span style="font-size:.8rem">Muốn học thêm? Chọn một chế độ luyện bổ sung bên dưới, hoặc chọn thêm Quyển/bài ở Trang chủ.</span></div>`
+      : `<button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">${hasDanglingReview ? '▶️ Tiếp tục phiên học' : '▶️ Bắt đầu học'}</button>`}
     ${summary}
     ${progressHtml}
+    ${quickPace}
     ${limitLine}
     ${capLine}
+    ${backlogRescue}
+    <div id="td-adaptive-slot"></div>
     ${data.blockedByBacklog ? `<div style="font-size:.8rem;color:var(--muted);margin:8px 0;">⏳ Từ mới đang tạm khoá vì phạm vi đang chọn còn ${data.totalDue} thẻ đến hạn, nhiều hơn số lượt ôn còn lại hôm nay — ôn bớt, hoặc tắt "Chỉ học từ mới sau khi hết backlog ôn tập" trong Cài đặt hằng ngày nếu muốn học từ mới ngay.</div>` : ''}
     ${data.weakCount > 0 ? `<button class="btn" style="width:100%;margin-top:8px;background:var(--l10c);color:var(--l10a);" onclick="ssEnterMode('review-weak')">⚠️ Luyện từ hay quên (${data.weakCount})</button>` : ''}
     ${leechBtn}

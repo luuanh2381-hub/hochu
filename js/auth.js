@@ -107,6 +107,7 @@ function applyUIState() {
 let authMode = 'login'; // 'login' | 'register'
 let syncTimer = null;
 let syncOk = true;
+let _progressSyncDirty = false;
 let currentRole = 'user';   // 'user' | 'admin' | 'superadmin'
 let currentRank = null;     // {name, icon, next:{name,icon,remain}|null}
 function isAdminRole() { return currentRole === 'admin' || currentRole === 'superadmin'; }
@@ -190,6 +191,7 @@ async function authSubmit() {
     applyUIState();
     cacheProgressLocally();
     closeAuthGate();
+    if (typeof sqSyncFromServer === 'function') sqSyncFromServer(true);
     render();
     // Không còn chế độ dùng thử: từ vựng chỉ tải được SAU khi đăng nhập (cần token) — tải ngay tại đây.
     if (typeof ensureVocabLoaded === 'function') {
@@ -260,6 +262,7 @@ async function authLogout() {
   // trong CÙNG NGÀY (Yêu cầu 3). authUsername đổi về null ngay dưới đây nên set trong bộ nhớ cũng
   // phải đổi theo (không còn ai đăng nhập -> không có "đã hoàn thành hôm nay" nào áp dụng).
   sessionKnownHz = new Set();
+  if (typeof sqResetRemoteSync === 'function') sqResetRemoteSync();
   if (typeof wnReset === 'function') wnReset(); // V105: không giữ mẹo nhớ của người vừa đăng xuất
   if (typeof skResetState === 'function') skResetState(); // V104: không giữ số liệu kỹ năng của người vừa đăng xuất
   localStorage.removeItem('authToken'); localStorage.removeItem('authUsername');
@@ -306,6 +309,7 @@ function cacheProgressLocally() {
 // Đồng bộ lên server (gộp các lần lưu liên tiếp trong 700ms để đỡ tốn request)
 function scheduleSync() {
   if (!authToken) return;
+  _progressSyncDirty = true;
   syncOk = null; updateSyncIndicator();
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {
@@ -317,10 +321,25 @@ function scheduleSync() {
       });
       const data = await res.json();
       syncOk = !!data.ok;
+      if (syncOk) _progressSyncDirty = false;
       if (data.rank) { currentRank = data.rank; updateUserBadge(); }
     } catch { syncOk = false; }
     updateSyncIndicator();
   }, 700);
+}
+function flushProgressSyncKeepalive() {
+  if (!_progressSyncDirty || !authToken) return;
+  clearTimeout(syncTimer);
+  _progressSyncDirty = false;
+  try {
+    fetch('/api/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(progressState),
+      keepalive: true,
+      noRetry: true,
+    }).catch(() => {});
+  } catch {}
 }
 function updateSyncIndicator() {
   const badge = document.getElementById('user-badge');
@@ -350,6 +369,7 @@ async function flushProgressSync() {
     });
     const data = await res.json();
     syncOk = !!data.ok;
+    if (syncOk) _progressSyncDirty = false;
     if (data.rank) { currentRank = data.rank; updateUserBadge(); }
   } catch { syncOk = false; }
   updateSyncIndicator();
@@ -361,6 +381,7 @@ async function flushProgressSync() {
 async function bootAuth() {
   if (authToken && authUsername) {
     flushReviewOutbox(); // FIX (Task 3): tự gửi lại review còn kẹt trong outbox từ phiên trước (F5/mất mạng/đóng tab)
+    if (typeof sqSyncFromServer === 'function') sqSyncFromServer(true); // Đồng bộ phiên học đang dở từ thiết bị khác ngay lúc khởi động
     const cachedRaw = localStorage.getItem('progressCache_' + authUsername);
     let enteredWithCache = false;
     if (cachedRaw) {

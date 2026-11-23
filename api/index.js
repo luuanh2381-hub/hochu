@@ -45,6 +45,7 @@ const orderSentence = require('../js/order-sentence'); // V135: chấm "Sắp x�
 const PROGRAM_SENTENCES = require('../js/sentences-data'); // V135: câu mẫu giáo trình — nguồn câu ĐÚNG khi chấm sắp xếp câu
 const multiGrade = require('../lib/multi-grade'); // V131: chấm "câu 3 phần" (đúng 2/3) cho thẻ FSRS chính thức — chỉ khi client gửi `parts`
 const studyDays = require('../lib/study-days'); // V119.4: đếm số ngày đã học / số ngày từ khi tạo tài khoản
+const sessionSnapshot = require('../lib/session-snapshot'); // Đồng bộ phiên học đang dở giữa các thiết bị
 const orphans = require('../lib/orphans');
 const { resolveExercise, isCountableAnswer, MEASURABLE_SKILLS, gradeAnswer, gradeBinaryVerdict, PRACTICE_SOURCES, cleanExposure } = require('../lib/skills');
 const skillRecommend = require('../lib/skill-recommend');
@@ -1235,6 +1236,16 @@ app.get('/api/skills/recommendations', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+// Phân tích chuyên sâu CHỈ ĐỌC: ma trận thanh điệu 4×4, 4 nguyên nhân sai, khung giờ vàng, tổng kết tuần & 3 tầng ổn định.
+app.get('/api/skills/insights', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const insights = await skillStore.getInsights(authed.username, { days: req.query.days });
+    res.json({ ok: true, ...insights });
+  } catch (e) { fail(res, e); }
+});
+
 // V133 — các cặp người học HAY NHẦM (đáp án sai lặp lại ≥ 2 lần trong 180 ngày) cho chế độ "A hay B?". CHỈ ĐỌC, chỉ dữ liệu của ĐÚNG user trong token.
 app.get('/api/skills/confusion-pairs', async (req, res) => {
   const authed = await requireAuth(req, res);
@@ -1538,6 +1549,32 @@ app.get('/api/study/session/reviewed-since', async (req, res) => {
     const hzs = String(req.query.cards || '').split(',').slice(0, 200).map((p) => { try { return decodeURIComponent(p.split('|')[0]); } catch (e) { return ''; } }).filter(Boolean);
     const reviewed = await getCardsReviewedSince(authed.username, hzs, since);
     res.json({ ok: true, reviewed });
+  } catch (e) { fail(res, e); }
+});
+
+// Đồng bộ phiên học đang dở + danh sách từ đã hoàn thành hôm nay giữa các thiết bị (tách khỏi lõi FSRS).
+app.get('/api/study/session/snapshot', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const snap = await sessionSnapshot.getSnapshot(authed.username);
+    res.json({ ok: true, ...snap });
+  } catch (e) { fail(res, e); }
+});
+
+app.post('/api/study/session/snapshot', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const body = req.body || {};
+    const out = await sessionSnapshot.saveSnapshot(authed.username, {
+      mode: body.mode,
+      session: body.session,
+      clear: !!body.clear,
+      dayKnown: body.dayKnown,
+      savedAt: body.savedAt,
+    });
+    res.json({ ok: true, ...out });
   } catch (e) { fail(res, e); }
 });
 
@@ -1994,8 +2031,25 @@ function resolvePackageEntryForBrowser(root, subpath) {
       if (key === '.') target = pickExportTarget(exp);
     } else if (typeof exp === 'object') {
       const hasSubpathKeys = Object.keys(exp).some((k) => k.startsWith('.'));
-      if (hasSubpathKeys) target = key in exp ? pickExportTarget(exp[key]) : null;
-      else if (key === '.') target = pickExportTarget(exp);
+      if (hasSubpathKeys) {
+        if (key in exp) {
+          target = pickExportTarget(exp[key]);
+        } else {
+          // Hỗ trợ wildcard pattern trong exports (vd "./*": "./*" hoặc "./*": "./dist/*.js")
+          for (const [pat, val] of Object.entries(exp)) {
+            const starIdx = pat.indexOf('*');
+            if (starIdx === -1) continue;
+            const prefix = pat.slice(0, starIdx), suffix = pat.slice(starIdx + 1);
+            if (key.startsWith(prefix) && key.endsWith(suffix) && key.length >= prefix.length + suffix.length) {
+              const matched = key.slice(prefix.length, key.length - suffix.length);
+              const rawTarget = pickExportTarget(val);
+              if (rawTarget) { target = rawTarget.replace('*', matched); break; }
+            }
+          }
+        }
+      } else if (key === '.') {
+        target = pickExportTarget(exp);
+      }
     }
     if (!target) return { relPath: null, reason: `exports_map_khong_co_entry_cho:${key}` };
   } else {
@@ -2412,6 +2466,9 @@ function rewriteBareSpecifiersInSource(sourceText, filePath) {
 function sendPackageFile(filePath, res) {
   const ext = path.extname(filePath);
   res.setHeader('Content-Type', BROWSER_OPTIMIZER_CONTENT_TYPES[ext] || 'application/octet-stream');
+  // Bắt buộc dưới COEP: require-corp (đặc biệt cho Worker module script và file .wasm khi chạy sau proxy/local).
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
   if (JS_TEXT_EXTENSIONS.has(ext)) {
     let src;
     try { src = fs.readFileSync(filePath, 'utf8'); }
@@ -2436,27 +2493,44 @@ function sendPackageFile(filePath, res) {
 }
 
 // Cache trong-bộ-nhớ KHÔNG đủ tin cậy trên Vercel (mỗi request có thể vào 1 instance lạnh, cache rỗng) —
-// nên urlKey được thiết kế để TỰ KIỂM CHỨNG: tìm các vị trí khả dĩ của gói, tính lại key, khớp thì dùng.
+// nên urlKey được thiết kế để TỰ KIỂM CHỨNG: nếu thiếu trên instance lạnh, tự chạy lại đồ thị 1 lần để
+// nạp toàn bộ root (kể cả gói lồng sâu như @napi-rs/wasm-runtime/node_modules/@tybys/wasm-util), rồi
+// đối chiếu hash cho cả gói có scope (@a/b -> a__b) lẫn gói KHÔNG có scope (tslib).
+let _dynamicPkgGraphHydrated = false;
 function findPkgRootByUrlKey(pkgName, urlKey) {
   if (_dynamicPkgRootByUrlKey[urlKey]) return _dynamicPkgRootByUrlKey[urlKey];
-  const candidates = [
+  if (!_dynamicPkgGraphHydrated) {
+    _dynamicPkgGraphHydrated = true;
+    try { computeBrowserOptimizerAssetUrlsDetailed(); } catch {}
+    if (_dynamicPkgRootByUrlKey[urlKey]) return _dynamicPkgRootByUrlKey[urlKey];
+  }
+  const namesToTry = Array.isArray(pkgName) ? pkgName : [pkgName];
+  const baseFiles = [
     path.join(__dirname, 'index.js'), // api/index.js thật -> node_modules gốc của project
     resolveBrowserOptimizerPkgRoot('binding'),
     resolveBrowserOptimizerPkgRoot('binding-wasm32-wasi'),
-  ].filter(Boolean).map((f) => findPkgRootByName(pkgName, f));
-  for (const root of candidates) if (root && pkgUrlKey(pkgName, root) === urlKey) return root;
+  ].filter(Boolean);
+  for (const name of namesToTry) {
+    for (const f of baseFiles) {
+      const root = findPkgRootByName(name, f);
+      if (root && pkgUrlKey(name, root) === urlKey) return root;
+    }
+  }
   return null;
 }
 
 function serveDynamicPkgFile(req, res) {
   const urlKey = req.params.urlKey;
-  // urlKey dạng "<tên gói đã làm sạch>.<hash root>" — phần tên gói đọc được trực tiếp từ key nên không
-  // cần cache để biết đang phục vụ gói nào; root thì tìm lại + đối chiếu hash (xem findPkgRootByUrlKey).
-  const pkgName = _dynamicPkgNameByUrlKey[urlKey]
-    || urlKey.replace(/\.[0-9a-f]{10}$/, '').replace(/__/g, '/').replace(/^([^@])/, '@$1');
-  const root = findPkgRootByUrlKey(pkgName, urlKey);
+  // urlKey dạng "<tên gói đã làm sạch>.<hash root>":
+  //   - Gói có scope "@scope/name" → "scope__name.<hash>" (có "__")
+  //   - Gói KHÔNG có scope "tslib" → "tslib.<hash>" (KHÔNG có "__" — KHÔNG được ép thêm "@" thành "@tslib"!)
+  const rawBase = urlKey.replace(/\.[0-9a-f]{10}$/, '');
+  const guessedNames = _dynamicPkgNameByUrlKey[urlKey]
+    ? [_dynamicPkgNameByUrlKey[urlKey]]
+    : (rawBase.includes('__') ? ['@' + rawBase.replace(/__/g, '/'), rawBase] : [rawBase]);
+  const root = findPkgRootByUrlKey(guessedNames, urlKey);
   if (!root) {
-    res.status(404).json({ ok: false, error: `Không xác định được thư mục của gói ${pkgName} cho URL này — gói có thể chưa được cài trên instance server đang phục vụ request.` });
+    res.status(404).json({ ok: false, error: `Không xác định được thư mục của gói ${guessedNames[0]} cho URL này — gói có thể chưa được cài trên instance server đang phục vụ request.` });
     return;
   }
   const relPath = (req.params[0] || '').replace(/\\/g, '/');

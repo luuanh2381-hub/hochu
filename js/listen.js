@@ -43,7 +43,10 @@ async function _bindListenAsync(forceReload) {
   if (!forceReload && lsQueue.items.length > 0) { lsRenderQ(); return; }
   if (!forceReload && !lsRestoreAttempted) {
     lsRestoreAttempted = true;
-    const extra = sqRestoreIntoQueue('listen', lsQueue);
+    const extra = (typeof sqRestoreAndRevalidate === 'function')
+      ? await sqRestoreAndRevalidate('listen', lsQueue)
+      : sqRestoreIntoQueue('listen', lsQueue);
+    if (currentTab !== 'listen') return;
     if (extra) { lsScore = extra.score || 0; lsRenderQ(); return; }
   }
   lsScore = 0;
@@ -117,8 +120,10 @@ async function lsPickWord(btn, chosen, correct) {
   if(isCorrectLocally) playDing(); else playBuzz();
   if (isCorrectLocally) lsScore++;
   if (isLoggedIn()) {
+    const reviewJob = submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('listen'), exerciseType: exerciseTypeFor('listen'), selectedAnswer: chosen, responseTimeMs });
+    if (typeof sqMarkGraded === 'function') sqMarkGraded('listen', lsQueue, w, isCorrectLocally, { score: lsScore });
     await Promise.all([
-      submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('listen'), exerciseType: exerciseTypeFor('listen'), selectedAnswer: chosen, responseTimeMs }),
+      reviewJob,
       new Promise(r => setTimeout(r, 1400)),
     ]);
   }

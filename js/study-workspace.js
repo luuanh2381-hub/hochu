@@ -238,8 +238,8 @@ function swPause() {
   if (typeof rvClearCountdown === 'function') rvClearCountdown();     // dừng đếm ngược tự chọn rating/tự chuyển câu
   if (typeof speechSynthesis !== 'undefined') { try { speechSynthesis.cancel(); } catch {} }
   swClosePanel();
-  // Lưu hàng đợi hiện tại: nếu đóng trang khi đang dừng, "Học tiếp" khôi phục đúng chỗ. Không ghi bất kỳ kết quả câu hỏi nào.
-  try { if (!rvQueue.practiceOnly) sqPersist(rvStorageMode(), rvQueue, { summary: rvSummary, log: rvLog }); } catch {}
+  // Lưu hàng đợi hiện tại: nếu đóng trang khi đang dừng, "Học tiếp" khôi phục đúng chỗ (giữ đủ rvLearner). Không ghi bất kỳ kết quả câu hỏi nào.
+  try { if (!rvQueue.practiceOnly) sqPersist(rvStorageMode(), rvQueue, { summary: rvSummary, log: rvLog, learner: rvLearner }); } catch {}
   const pz = document.createElement('div');
   pz.id = 'sw-pause'; pz.className = 'sw-pause'; pz.setAttribute('role', 'dialog'); pz.setAttribute('aria-modal', 'true'); pz.setAttribute('aria-label', 'Đã tạm dừng');
   pz.innerHTML = `<div class="sw-pause-box">

@@ -30,7 +30,7 @@
     "test:auth-security": "node test/auth-security.test.js",
     "verify:fsrs6": "node scripts/verify-fsrs6.js",
     "verify:optimizer-binding": "node scripts/verify-optimizer-binding.js",
-    "postinstall": "node scripts/verify-optimizer-binding.js; s=$?; node scripts/ensure-wasm-optimizer.js; exit $s",
+    "postinstall": "node scripts/ensure-wasm-optimizer.js; node scripts/verify-optimizer-binding.js",
     "migrate:fsrs": "node scripts/migrate-to-pure-fsrs.js",
     "migrate:vocab-identity": "node scripts/migrate-vocab-identity.js",
     "fix:current-lesson": "node scripts/fix-current-lesson-start.js",

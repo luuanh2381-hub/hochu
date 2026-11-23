@@ -9,6 +9,11 @@ let skState = { loaded: false, loading: false, error: null, overview: null, weak
 
 function skSetSubtab(t) { skState.subtab = t || 'all'; if (currentTab === 'skills') render(); }
 function skToggleWeakScope(on) { skState.weakScopeOnly = !!on; if (currentTab === 'skills') render(); }
+// Đánh dấu làm mới số liệu Phân tích năng lực sau khi học xong ở Hôm nay học / Trắc nghiệm.
+function skInvalidateCache() {
+  skState.loaded = false;
+  if (typeof saState !== 'undefined' && saState) { saState.loadedAt = 0; saState.insights = null; }
+}
 
 function skAudioOk() { return typeof skillAudioAvailable === 'function' && skillAudioAvailable(); }
 
@@ -23,17 +28,19 @@ function renderSkills() {
   }
   if (typeof saState !== 'undefined' && saState.word) return saRenderWordDetail(); // V110: xem chi tiết 1 từ
   const st = skState.subtab || 'all';
-  const tabs = [['all', 'Tất cả'], ['overview', '🎯 Kế hoạch & Kỹ năng'], ['words', '😓 Từ yếu & Luyện'], ['trends', '📈 Trí nhớ & Xu hướng']];
+  const tabs = [['all', 'Tất cả'], ['overview', '🎯 Kế hoạch & Kỹ năng'], ['insights', '🔬 Chẩn đoán sâu'], ['words', '😓 Từ yếu & Luyện'], ['trends', '📈 Trí nhớ & Xu hướng']];
   const tabBar = `<div class="dash-filter-row" style="margin-bottom:12px">${tabs.map(([id, lb]) =>
     `<button class="dash-chip${st === id ? ' sel' : ''}" onclick="skSetSubtab('${id}')">${lb}</button>`).join('')}</div>`;
   // V110: giữ đúng thứ tự các khối (saRenderRecs + saRenderPooled + skRenderOverview); lọc theo sub-tab để tránh cuộn dài.
   const secOverview = saRenderPlan() + saRenderRecs() + saRenderPooled() + skRenderOverview();
+  const secInsights = typeof saRenderInsights === 'function' ? saRenderInsights() : '';
   const secWords = skRenderPracticeLauncher() + saRenderWordSearch() + skRenderWeakList();
   const secTrends = saRenderRetention() + saRenderByType() + skRenderTrend();
   if (st === 'overview') return tabBar + secOverview;
+  if (st === 'insights') return tabBar + (secInsights || '<div class="panel center" style="padding:24px;color:var(--muted)">⏳ Đang tải phân tích chuyên sâu hoặc chưa đủ dữ liệu.</div>');
   if (st === 'words') return tabBar + secWords;
   if (st === 'trends') return tabBar + secTrends;
-  return tabBar + secOverview + saRenderRetention() + skRenderPracticeLauncher() + saRenderWordSearch()
+  return tabBar + secOverview + secInsights + saRenderRetention() + skRenderPracticeLauncher() + saRenderWordSearch()
     + skRenderWeakList() + saRenderByType() + skRenderTrend();
 }
 

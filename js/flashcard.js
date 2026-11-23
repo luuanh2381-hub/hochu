@@ -61,7 +61,11 @@ async function bindFlash(forceReload) {
   if (!forceReload && fcQueue.items.length > 0) { fcUpdate(); return; }
   if (!forceReload && !fcRestoreAttempted) {
     fcRestoreAttempted = true;
-    if (sqRestoreIntoQueue('flash', fcQueue)) { fcUpdate(); return; }
+    const restored = (typeof sqRestoreAndRevalidate === 'function')
+      ? await sqRestoreAndRevalidate('flash', fcQueue)
+      : sqRestoreIntoQueue('flash', fcQueue);
+    if (currentTab !== 'flash') return;
+    if (restored) { fcUpdate(); return; }
   }
   const limit = questionCount === 9999 ? 9999 : questionCount;
   const front = document.getElementById('fc-front');
@@ -332,7 +336,9 @@ async function fcAnswer(ok) {
   if (btnsEl) { btnsEl.classList.add('is-busy'); btnsEl.querySelectorAll('button').forEach(b => b.disabled = true); }
   if (isLoggedIn()) {
     const selectedAnswer = ok ? w.vi : '⨯ (tự chấm: chưa nhớ) ⨯';
-    await submitFsrsReviewAwaited({ word: w, quizType: 'hz2vi', selectedAnswer, responseTimeMs: fcResponseTimeMs });
+    const reviewJob = submitFsrsReviewAwaited({ word: w, quizType: 'hz2vi', selectedAnswer, responseTimeMs: fcResponseTimeMs });
+    if (typeof sqMarkGraded === 'function') sqMarkGraded('flash', fcQueue, w, ok);
+    await reviewJob;
   }
   fcSubmitting = false;
   if (currentTab !== 'flash' || fcQueue.items[0] !== w) return; // user đã rời tab hoặc hàng đợi đã đổi trong lúc chờ

@@ -2,9 +2,11 @@
 // ════════════════════════════════════════════════════
 // QUIZ
 // ════════════════════════════════════════════════════
-let qzQueue = sqCreate(), qzType='漢→Việt', qzScore=0, qzStartedAt=0;
+let qzQueue = sqCreate(), qzType='🎯 Thích ứng', qzScore=0, qzStartedAt=0;
 let qzQuestionCount = 30; // số câu riêng cho Trắc nghiệm, mặc định 30 (không dùng chung questionCount với các tab khác)
 let qzWordExamples = []; // ví dụ theo từng từ (kho đảm bảo mỗi từ có sẵn vài câu), dùng để minh hoạ từ đang hỏi
+let qzQSession = (typeof QS !== 'undefined') ? QS.newSession() : null;
+let qzLearner = null, qzCurrentDir = '漢→Việt', qzAdaptiveWhy = '', qzCurrentTypeId = 'hz2vi';
 
 function renderQuiz() {
   return `
@@ -12,9 +14,58 @@ function renderQuiz() {
     <div class="count-row" style="margin-bottom:0;">
       <select onchange="qzSetCount(this.value)" title="Số câu">${[5,10,15,20,30].map(n=>`<option value="${n}"${n==qzQuestionCount?' selected':''}>${n}</option>`).join('')}</select>
     </div>
-    ${['漢→Việt','Việt→漢','Âm→漢'].map(t=>`<button class="quiz-type-btn${qzType===t?' active':''}" onclick="qzSetType('${t}')">${t}</button>`).join('')}
+    ${['🎯 Thích ứng','漢→Việt','Việt→漢','Âm→漢'].map(t=>`<button class="quiz-type-btn${qzType===t?' active':''}" onclick="qzSetType('${t}')">${t}</button>`).join('')}
   </div>
   <div id="qz-area"></div>`;
+}
+
+async function qzLoadLearner() {
+  if (!isLoggedIn()) return;
+  if (typeof saState !== 'undefined' && saState && saState.learner) { qzLearner = saState.learner; return; }
+  try {
+    const r = await fetch('/api/skills/learner', { headers: authHeaders() }).then(x => x.json());
+    if (r && r.ok && r.learner) {
+      qzLearner = r.learner;
+      if (typeof saState !== 'undefined' && saState) saState.learner = r.learner;
+    }
+  } catch {}
+}
+
+// Chọn chiều hỏi thông minh khi bật "🎯 Thích ứng": dùng chung bộ não QS.choose + hồ sơ người học từ Phân tích năng lực.
+function qzResolveAdaptiveDir(w) {
+  if (qzType !== '🎯 Thích ứng') {
+    qzCurrentDir = qzType;
+    qzCurrentTypeId = qzType === '漢→Việt' ? 'hz2vi' : (qzType === 'Việt→漢' ? 'vi2hz' : 'py2hz');
+    qzAdaptiveWhy = '';
+    return qzCurrentDir;
+  }
+  const mapDir = { hz2vi: '漢→Việt', vi2hz: 'Việt→漢', py2hz: 'Âm→漢' };
+  if (typeof QS !== 'undefined' && typeof QE !== 'undefined') {
+    if (!qzQSession) qzQSession = QS.newSession();
+    const ctx = {
+      pool: WORDS, examples: qzWordExamples,
+      sentences: (typeof SENTENCES !== 'undefined') ? SENTENCES : [],
+      confuseGroups: (typeof CONFUSE_GROUPS !== 'undefined') ? CONFUSE_GROUPS : [],
+      audioOk: false,
+      heavy: (typeof pickHeavyDistractors === 'function') ? pickHeavyDistractors : null,
+    };
+    const q = QS.choose(w, ctx, {
+      session: qzQSession, learner: qzLearner,
+      only: ['hz2vi', 'vi2hz', 'py2hz'], allowPracticeOnly: true,
+      remaining: qzQueue.items.length,
+    });
+    if (q && mapDir[q.typeId]) {
+      qzCurrentTypeId = q.typeId;
+      qzCurrentDir = mapDir[q.typeId];
+      qzAdaptiveWhy = q.why || `Thích ứng chọn chiều ${qzCurrentDir} theo độ vững của từ`;
+      return qzCurrentDir;
+    }
+  }
+  // Fallback nhẹ khi thiếu QS: từ mới/lapses nhiều → 漢→Việt; từ đã vững → Việt→漢 / Âm→漢
+  qzCurrentDir = (w && ((w.lapses || 0) >= 2 || (w.reps || 0) < 2)) ? '漢→Việt' : 'Việt→漢';
+  qzCurrentTypeId = qzCurrentDir === '漢→Việt' ? 'hz2vi' : 'vi2hz';
+  qzAdaptiveWhy = `Tự chọn chiều ${qzCurrentDir}`;
+  return qzCurrentDir;
 }
 
 function qzSetCount(v) {
@@ -80,13 +131,17 @@ async function _bindQuizAsync(forceReload) {
   if (!forceReload && qzQueue.items.length > 0) { qzRenderQ(); return; }
   if (!forceReload && !qzRestoreAttempted) {
     qzRestoreAttempted = true;
-    const extra = sqRestoreIntoQueue('quiz', qzQueue);
+    const extra = (typeof sqRestoreAndRevalidate === 'function')
+      ? await sqRestoreAndRevalidate('quiz', qzQueue)
+      : sqRestoreIntoQueue('quiz', qzQueue);
+    if (currentTab !== 'quiz') return;
     if (extra) { qzScore = extra.score || 0; qzRenderQ(); qzLoadSentencePool().then(() => qzRenderQ()); return; }
   }
   qzScore = 0;
+  if (typeof QS !== 'undefined') qzQSession = QS.newSession();
   const area = document.getElementById('qz-area');
   if (isLoggedIn() && area) area.innerHTML = `<div class="panel center" style="padding:24px">⏳ Đang tải hàng đợi FSRS...</div>`;
-  const { error } = await sqLoad(qzQueue, qzQuestionCount);
+  const [{ error }] = await Promise.all([sqLoad(qzQueue, qzQuestionCount), qzLoadLearner()]);
   if (currentTab !== 'quiz') return; // user đã rời tab trong lúc chờ tải
   if (error) { if (area) { if (typeof showLoadError === 'function') showLoadError(error, () => bindQuiz(true), { container: area, noHome: true }); else area.innerHTML = `<div class="panel center" style="padding:24px">⚠️ ${error}</div>`; } return; } // V175: nút Thử lại
   qzRenderQ();
@@ -103,29 +158,32 @@ function qzRenderQ() {
     return;
   }
   if (qzQueue.items.length === 0) {
+    if (typeof skInvalidateCache === 'function') skInvalidateCache();
     area.innerHTML = `<div class="panel exam-result">
       <div class="exam-score">${qzScore}/${qzQueue.answeredCount}</div>
       <div class="exam-rank">${qzRank(qzScore/qzQueue.answeredCount)}</div>
       <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px">
         <button class="btn btn-primary" onclick="qzContinueSession()">▶️ Học tiếp</button>
         <button class="btn" onclick="qzRelearnFromStart()">🔁 Học lại từ đầu</button>
+        <button class="btn" onclick="goTab('skills')">📈 Xem Phân tích năng lực</button>
       </div>
     </div>`;
     if (isLoggedIn()) refreshServerMeta(); // hết phiên — làm mới streak/known thật
     return;
   }
   const w = qzQueue.items[0];
-  // V86: field chấm đáp án + mode Heavy Distractor phụ thuộc ĐÚNG hướng câu hỏi đang chọn (qzType)
+  const effType = qzResolveAdaptiveDir(w);
+  // V86: field chấm đáp án + mode Heavy Distractor phụ thuộc ĐÚNG hướng câu hỏi đang chọn (effType)
   // — 漢→Việt chấm theo nghĩa (vi), 2 hướng còn lại chấm theo Hán tự (hz); Âm→漢 coi như 'listening'
   // vì đầu bài LÀ pinyin nên phải ưu tiên distractor gần âm đọc, không chỉ gần hình chữ.
-  const answerField = qzType === '漢→Việt' ? 'vi' : 'hz';
-  const mode = qzType === 'Âm→漢' ? 'listening' : 'text';
+  const answerField = effType === '漢→Việt' ? 'vi' : 'hz';
+  const mode = effType === 'Âm→漢' ? 'listening' : 'text';
   const opts = rvMakeOpts(w, { answerField, mode }); // dùng chung bộ sinh nhiễu Heavy Distractor với "Hôm nay học" (pool = toàn bộ WORDS) — xem js/distractor-engine.js
   let qHtml, optHtml;
-  if (qzType === '漢→Việt') {
+  if (effType === '漢→Việt') {
     qHtml = `<div class="fc-hz">${escapeHtml(w.hz)}</div>${showPinyin?`<div class="fc-py">${escapeHtml(w.py)}</div>`:''}${showHanViet && w.hanviet?`<div class="fc-hv">Hán Việt: ${escapeHtml(w.hanviet)}</div>`:''}`;
     optHtml = opts.map(o=>`<button class="quiz-opt" data-v="${escapeHtml(o.vi)}" onclick="qzPick(this,'${escapeJsAttr(o.hz)}')">${escapeHtml(o.vi)}</button>`).join('');
-  } else if (qzType === 'Việt→漢') {
+  } else if (effType === 'Việt→漢') {
     qHtml = `<div class="fc-vi" style="font-size:1.3rem">${escapeHtml(w.vi)}</div>`;
     optHtml = opts.map(o=>`<button class="quiz-opt" data-v="${escapeHtml(o.hz)}" onclick="qzPick(this,'${escapeJsAttr(o.hz)}')">${escapeHtml(o.hz)}${showPinyin?`<div class="quiz-sub">${escapeHtml(o.py)}</div>`:''}${showHanViet && o.hanviet?`<div class="quiz-hv">${escapeHtml(o.hanviet)}</div>`:''}</button>`).join('');
   } else {
@@ -138,17 +196,19 @@ function qzRenderQ() {
     : '';
   // Chỉ hiện chiết tự bộ thủ khi chữ Hán đã hiện sẵn trong câu hỏi (漢→Việt) — các chế độ khác
   // (Việt→漢, Âm→漢) chữ Hán chính là đáp án cần đoán, hiện chiết tự sẽ lộ đáp án.
-  const partsHtml = qzType === '漢→Việt' ? renderHanziParts(w.hz, true) : '';
+  const partsHtml = effType === '漢→Việt' ? renderHanziParts(w.hz, true) : '';
+  const whyChip = qzAdaptiveWhy ? `<div class="gf-why-chip">🎯 ${escapeHtml(qzAdaptiveWhy)}</div>` : '';
   area.innerHTML = `
     <div class="panel">
-      <div style="font-size:.75rem;color:var(--muted);font-weight:700;margin-bottom:6px">Câu ${qzQueue.answeredCount+1} · còn ${qzQueue.items.length} trong hàng đợi · ${Math.round(qzScore/(qzQueue.answeredCount||1)*100)}% đúng</div>
+      <div style="font-size:.75rem;color:var(--muted);font-weight:700;margin-bottom:6px">Câu ${qzQueue.answeredCount+1} · còn ${qzQueue.items.length} trong hàng đợi · ${Math.round(qzScore/(qzQueue.answeredCount||1)*100)}% đúng${qzType === '🎯 Thích ứng' ? ` · <b>${effType}</b>` : ''}</div>
+      ${whyChip}
       <div class="quiz-q">${qHtml}</div>
       ${exampleHtml}
       ${partsHtml}
       <div class="quiz-opts" id="qz-opts">${optHtml}</div>
     </div>`;
   document.querySelectorAll('#qz-opts .quiz-opt').forEach(b=>{
-    b._correct = (b.dataset.v === (qzType==='漢→Việt' ? w.vi : w.hz));
+    b._correct = (b.dataset.v === (effType==='漢→Việt' ? w.vi : w.hz));
   });
   qzStartedAt = performance.now(); vtMarkStart(); // Phần 4: đo từ thời điểm câu hỏi THỰC SỰ hiển thị
 }
@@ -159,6 +219,7 @@ function qzRenderQ() {
 // chừng phiên (hàng đợi cạn thật mới coi là hết phiên, xem qzRenderQ).
 async function qzPick(btn, hz) {
   const w = qzQueue.items[0];
+  const effType = qzType === '🎯 Thích ứng' ? qzCurrentDir : qzType;
   const isCorrectLocally = btn._correct;
   // "Review nhiễu khi thoát ra vào lại": trừ tổng thời gian tab bị ẩn ra khỏi responseTimeMs.
   const responseTimeMs = Math.max(0, performance.now() - qzStartedAt - vtHiddenMs());
@@ -170,14 +231,25 @@ async function qzPick(btn, hz) {
   if (isCorrectLocally) playDing(); else playBuzz();
   speak(w.hz);
   if (isCorrectLocally) qzScore++;
+  // Cập nhật bộ não thích ứng & đánh dấu làm mới tab Phân tích năng lực
+  const sk = effType === '漢→Việt' ? 'recognition' : 'recall';
+  if (typeof QS !== 'undefined' && qzQSession) {
+    QS.record(qzQSession, { hz: w.hz, typeId: qzCurrentTypeId, skill: sk, typed: false, correctIndex: null }, isCorrectLocally, responseTimeMs);
+  }
+  if (typeof TP !== 'undefined' && qzLearner) {
+    qzLearner = TP.applyAnswer(qzLearner, { skill: sk, typed: false, correct: isCorrectLocally });
+  }
+  if (typeof skInvalidateCache === 'function') skInvalidateCache();
   // FIX (Bug 1 gốc — "UI chuyển câu nhưng Neon chưa lưu"): TRƯỚC ĐÂY submitFsrsReview() chạy NỀN,
   // KHÔNG chờ, nên UI có thể chuyển câu (và user có thể refresh/đóng tab) trước khi Neon xác nhận
   // đã lưu — mất dữ liệu. Giờ ĐỢI submitFsrsReviewAwaited() (có trần chờ, xem study-queue.js) SONG
   // SONG với đúng khoảng nghỉ hiển thị đáp án 1400ms như cũ — mạng nhanh thì tổng thời gian KHÔNG
   // đổi so với trước (vẫn 1400ms), mạng chậm thì đợi thêm chứ không chuyển câu "hụt".
   if (isLoggedIn()) {
+    const reviewJob = submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor(effType), exerciseType: exerciseTypeFor('quiz', effType), selectedAnswer: btn.dataset.v, responseTimeMs });
+    if (typeof sqMarkGraded === 'function') sqMarkGraded('quiz', qzQueue, w, isCorrectLocally, { score: qzScore });
     await Promise.all([
-      submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor(qzType), exerciseType: exerciseTypeFor('quiz', qzType), selectedAnswer: btn.dataset.v, responseTimeMs }),
+      reviewJob,
       new Promise(r => setTimeout(r, 1400)),
     ]);
   }

@@ -361,10 +361,12 @@ function renderOptimizerBody(s) {
   if (s.canRollback && !isActive) {
     html += `<button class="auth-submit" style="margin-top:8px;background:var(--l15a);" onclick="rollbackOptimizerWeights()">⏮️ Rollback</button>`;
   }
-  if (isFailed && s.lastError) {
+  const isCancelledWithError = s.status === 'cancelled' && s.lastError
+    && !/^(Đã hủy theo yêu cầu\.?|user bấm Hủy)$/i.test(String(s.lastError).trim());
+  if ((isFailed || isCancelledWithError) && s.lastError) {
     // s.lastError: server ĐÃ tự chọn đúng câu cho đúng vai trò (user thường = câu chung an toàn;
     // admin = lỗi nội bộ đầy đủ — xem lib/fsrs/optimizer.js:getOptimizerStatus, Phần "ERROR SECURITY").
-    html += `<div style="color:var(--fail);font-size:.7rem;text-align:center;margin-top:10px;line-height:1.4;">⚠️ Lỗi lần chạy trước: ${s.lastError}</div>`;
+    html += `<div style="color:var(--fail);font-size:.7rem;text-align:center;margin-top:10px;line-height:1.4;">⚠️ ${isFailed ? 'Lỗi lần chạy trước' : 'Lần chạy trước bị dừng do lỗi'}: ${s.lastError}</div>`;
   }
 
   body.innerHTML = html;
@@ -391,8 +393,23 @@ function showOptimizerError(msg) {
 //   4. Train xong → POST /browser/commit gửi weights lên, server tự tính lại điểm số + lưu candidate.
 // KHÔNG còn gọi /api/fsrs-optimizer/run hay /worker nữa — 2 route đó vẫn tồn tại (tương thích ngược)
 // nhưng không nơi nào trong sản phẩm còn kích hoạt (Phần V "không để 2 optimizer chạy song song").
+function checkBrowserOptimizerSupport() {
+  if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined') {
+    return 'Trình duyệt hiện tại không hỗ trợ WebAssembly hoặc Web Worker để chạy FSRS Optimizer. Hãy thử Chrome, Edge, Firefox hoặc Safari bản mới nhất.';
+  }
+  if (typeof SharedArrayBuffer === 'undefined' || !window.crossOriginIsolated) {
+    return 'Môi trường trình duyệt hiện tại chưa bật Cross-Origin Isolation (SharedArrayBuffer) nên không thể chạy WASM Optimizer. Hãy mở ứng dụng trực tiếp trên trình duyệt Chrome/Edge/Safari bản mới qua địa chỉ HTTPS chính thức (không mở trong Zalo/Messenger WebView hoặc HTTP cục bộ thiếu header COOP/COEP).';
+  }
+  return null;
+}
+
 async function runOptimizerNow() {
   if (_optimizerBusy || _optimizerBrowserRunning) return;
+  const envErr = checkBrowserOptimizerSupport();
+  if (envErr) {
+    showOptimizerError(envErr);
+    return;
+  }
   _optimizerBusy = true;
   const btn = document.getElementById('optimizer-run-btn');
   if (btn) { btn.disabled = true; btn.textContent = '🕓 Đang chuẩn bị dữ liệu...'; }
@@ -415,8 +432,8 @@ async function runOptimizerNow() {
       // báo lỗi rõ ràng + tự huỷ job vừa tạo (tránh để lại job "running" không ai train, phải chờ hết
       // hạn stale mới dọn — Phần VI).
       if (!data.assetUrls) {
-        errorMsg = 'Optimizer (bản chạy trong trình duyệt) chưa sẵn sàng trên server — thiếu gói WASM. Vui lòng báo cho quản trị viên kiểm tra Vercel Function Logs.';
-        fetch('/api/fsrs-optimizer/browser/cancel', {
+        errorMsg = 'Optimizer (bản chạy trong trình duyệt) chưa sẵn sàng trên server — thiếu gói WASM. Vui lòng báo cho quản trị viên kiểm tra nút "🔎 Kiểm tra engine native/WASI" hoặc Vercel Function Logs.';
+        await fetch('/api/fsrs-optimizer/browser/cancel', {
           method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ jobId: data.job.id, reason: 'assetUrls null lúc prepare — WASM package chưa sẵn sàng trên server' }),
         }).catch(() => {});
@@ -488,6 +505,8 @@ async function runBrowserOptimizerMainThread(jobId, trainingPayload, assetUrls) 
   }, OPTIMIZER_KEEPALIVE_MS);
   loadOptimizerStatus(); // render ngay trạng thái "training" (job đã running phía server) thay vì chờ tới lượt poll đầu tiên
 
+  let browserErrMsg = null;
+  let lastWorkerErr = null;
   try {
     injectOptimizerImportMap(assetUrls.importMap);
     const { initOptimizer } = await import(/* webpackIgnore: true */ assetUrls.dynamicWasiEntryUrl);
@@ -496,7 +515,14 @@ async function runBrowserOptimizerMainThread(jobId, trainingPayload, assetUrls) 
     }
     const binding = await initOptimizer({
       wasm: assetUrls.wasmAssetUrl,
-      worker: () => new Worker(assetUrls.workerScriptUrl, { type: 'module' }),
+      worker: () => {
+        const w = new Worker(assetUrls.workerScriptUrl, { type: 'module' });
+        w.addEventListener('error', (ev) => {
+          lastWorkerErr = (ev && (ev.message || (ev.error && ev.error.message))) || 'Lỗi nạp WASM Worker (kiểm tra tab Network / Console)';
+          console.error('[fsrs-optimizer] WASM worker error:', ev);
+        });
+        return w;
+      },
     });
     if (!binding || typeof binding.computeParameters !== 'function' || typeof binding.FSRSBindingItem !== 'function' || typeof binding.FSRSBindingReview !== 'function') {
       throw new Error('initOptimizer() không trả về đúng hình dạng binding mong đợi (thiếu computeParameters/FSRSBindingItem/FSRSBindingReview).');
@@ -548,23 +574,28 @@ async function runBrowserOptimizerMainThread(jobId, trainingPayload, assetUrls) 
         body: JSON.stringify({ jobId, weights }),
       });
       const commitData = await res.json().catch(() => null);
-      if (!commitData || !commitData.ok) showOptimizerError((commitData && commitData.error) || `Lưu kết quả thất bại (mã ${res.status}).`);
+      if (!commitData || !commitData.ok) browserErrMsg = (commitData && commitData.error) || `Lưu kết quả thất bại (mã ${res.status}).`;
     } catch (e) {
-      showOptimizerError('Train xong nhưng gửi kết quả lên server thất bại (lỗi mạng): ' + e.message + ' — có thể bấm Thử lại.');
+      browserErrMsg = 'Train xong nhưng gửi kết quả lên server thất bại (lỗi mạng): ' + e.message + ' — có thể bấm Thử lại.';
     }
   } catch (e) {
     if (!_optimizerBrowserCancelled) {
-      showOptimizerError('Optimizer lỗi trong trình duyệt: ' + ((e && e.message) || String(e)));
-      fetch('/api/fsrs-optimizer/browser/cancel', {
+      const rawMsg = ((e && e.message) || String(e)) + (lastWorkerErr ? ` [${lastWorkerErr}]` : '');
+      browserErrMsg = 'Optimizer lỗi trong trình duyệt: ' + rawMsg;
+      console.error('[fsrs-optimizer] browser training error:', e);
+      // Đợi server hủy job XONG TRƯỚC khi finally gọi loadOptimizerStatus(), tránh race thấy trạng thái "running" cũ.
+      await fetch('/api/fsrs-optimizer/browser/cancel', {
         method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, reason: (e && e.message) || String(e) }),
+        body: JSON.stringify({ jobId, reason: rawMsg.slice(0, 300) }),
       }).catch(() => {});
     }
   } finally {
     stopOptimizerKeepaliveOnly();
     _optimizerBrowserRunning = false;
     _optimizerBrowserJobId = null;
+    // Render lại modal TRƯỚC rồi mới điền #optimizer-error — tránh loadOptimizerStatus() xoá mất thông báo lỗi vừa hiện!
     await loadOptimizerStatus();
+    if (browserErrMsg) showOptimizerError(browserErrMsg);
   }
 }
 

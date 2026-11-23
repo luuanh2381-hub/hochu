@@ -232,7 +232,7 @@ try {
   };
   vm.createContext(sandbox);
   vm.runInContext(loadRoutes() +
-    '\nmodule.exports = { computeBrowserOptimizerAssetUrlsDetailed, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey };',
+    '\nmodule.exports = { computeBrowserOptimizerAssetUrlsDetailed, serveDynamicPkgFile, serveBrowserOptimizerPackageFile, _dynamicPkgRootByUrlKey, _dynamicPkgNameByUrlKey, resetColdStartCaches: () => { for (const k of Object.keys(_dynamicPkgRootByUrlKey)) delete _dynamicPkgRootByUrlKey[k]; for (const k of Object.keys(_dynamicPkgNameByUrlKey)) delete _dynamicPkgNameByUrlKey[k]; _dynamicPkgGraphHydrated = false; } };',
     sandbox, { filename: 'api/index.js (trích đoạn)' });
   M = sandbox.module.exports;
 } catch (e) {
@@ -346,6 +346,19 @@ if (M) {
       assert.strictEqual((await callRoute(M, url)).status, 200, `${spec} -> ${url} không tải được`);
     }
     assert.ok(body.includes(r.importMap['@napi-rs/wasm-runtime']), `worker phải trỏ đúng URL trong import map: ${body.slice(0, 200)}`);
+  });
+
+  test('cold-start serverless (cache RAM rỗng): tslib (không có scope @) và gói nested (@tybys/wasm-util) vẫn trả HTTP 200 kèm CORP/COEP', async () => {
+    const r = M.computeBrowserOptimizerAssetUrlsDetailed();
+    assert.strictEqual(r.ok, true);
+    M.resetColdStartCaches(); // Giả lập request rơi vào 1 Vercel serverless instance lạnh khác
+    const tslibResp = await callRoute(M, r.importMap['tslib']);
+    assert.strictEqual(tslibResp.status, 200, `tslib trên instance lạnh phải 200, nhận ${tslibResp.status}: ${tslibResp.text().slice(0, 200)}`);
+    assert.strictEqual(tslibResp.headers['cross-origin-resource-policy'], 'same-origin');
+    assert.strictEqual(tslibResp.headers['cross-origin-embedder-policy'], 'require-corp');
+    M.resetColdStartCaches();
+    const nestedResp = await callRoute(M, r.importMap['@tybys/wasm-util']);
+    assert.strictEqual(nestedResp.status, 200, `gói nested trên instance lạnh phải 200, nhận ${nestedResp.status}: ${nestedResp.text().slice(0, 200)}`);
   });
 }
 

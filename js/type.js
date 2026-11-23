@@ -41,7 +41,10 @@ async function _bindTypeAsync(forceReload) {
   if (!forceReload && tyQueue.items.length > 0) { tyRenderQ(); return; }
   if (!forceReload && !tyRestoreAttempted) {
     tyRestoreAttempted = true;
-    const extra = sqRestoreIntoQueue('type', tyQueue);
+    const extra = (typeof sqRestoreAndRevalidate === 'function')
+      ? await sqRestoreAndRevalidate('type', tyQueue)
+      : sqRestoreIntoQueue('type', tyQueue);
+    if (currentTab !== 'type') return;
     if (extra) { tyScore = extra.score || 0; tyRenderQ(); return; }
   }
   tyScore = 0;
@@ -124,8 +127,10 @@ async function tyCheck() {
   if (btnsEl) { btnsEl.classList.add('is-busy'); btnsEl.querySelectorAll('button').forEach(b => b.disabled = true); }
   if (okLocally) tyScore++;
   if (isLoggedIn()) {
+    const reviewJob = submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('type'), exerciseType: exerciseTypeFor('type'), selectedAnswer: val || '⨯ (bỏ trống) ⨯', responseTimeMs });
+    if (typeof sqMarkGraded === 'function') sqMarkGraded('type', tyQueue, w, okLocally, { score: tyScore });
     await Promise.all([
-      submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('type'), exerciseType: exerciseTypeFor('type'), selectedAnswer: val || '⨯ (bỏ trống) ⨯', responseTimeMs }),
+      reviewJob,
       new Promise(r => setTimeout(r, 1600)),
     ]);
   }
@@ -146,7 +151,9 @@ async function tySkip() {
   // "Review nhiễu khi thoát ra vào lại": trừ tổng thời gian tab bị ẩn ra khỏi responseTimeMs.
   const responseTimeMs = Math.max(0, performance.now() - tyStartedAt - vtHiddenMs());
   if (isLoggedIn()) {
-    await submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('type'), exerciseType: exerciseTypeFor('type'), selectedAnswer: '⨯ (bỏ qua) ⨯', responseTimeMs });
+    const reviewJob = submitFsrsReviewAwaited({ word: w, quizType: fsrsQuizTypeFor('type'), exerciseType: exerciseTypeFor('type'), selectedAnswer: '⨯ (bỏ qua) ⨯', responseTimeMs });
+    if (typeof sqMarkGraded === 'function') sqMarkGraded('type', tyQueue, w, false, { score: tyScore });
+    await reviewJob;
   }
   tySubmitting = false;
   if (currentTab !== 'type' || tyQueue.items[0] !== w) return;
