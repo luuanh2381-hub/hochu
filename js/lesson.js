@@ -23,6 +23,11 @@ function renderHome() {
       <button class="btn duo-quick-btn duo-quick-purple" onclick="ssEnterMode('listen')"><span class="dq-ic">🎧</span><span>Nghe chọn</span><span class="dq-sub">Luyện phản xạ tai</span></button>
       <button class="btn duo-quick-btn duo-quick-orange" onclick="ssEnterMode('type')"><span class="dq-ic">⌨️</span><span>Gõ chữ</span><span class="dq-sub">Nhớ mặt chữ &amp; Pinyin</span></button>
     </div>
+    <div class="gf-quick-tools">
+      <button type="button" class="btn btn-sm" onclick="if(typeof openHandsFreePodcast==='function')openHandsFreePodcast('atrisk');else goTab('listening')">📻 Nghe rảnh tay (Podcast)</button>
+      <button type="button" class="btn btn-sm" onclick="if(typeof openHanziNetwork==='function')openHanziNetwork();else goTab('compare')">🕸️ Sơ đồ họ chữ</button>
+      <button type="button" class="btn btn-sm" onclick="goTab('stats')">🗺️ Tiến độ HSK 1–4</button>
+    </div>
   </div>`;
 }
 function bindHome() {
@@ -39,7 +44,7 @@ async function loadHomeQuickstart() {
   // chỗ bằng thông báo lỗi mà tab "Hôm nay học" đã giải thích đầy đủ hơn (Phần 1 — giảm nhiễu).
   if (!data || !data.ok || !data.hasScope) { if (panel) panel.remove(); return; }
   if (data.dueCount === 0 && data.newInCurrentLesson === 0) {
-    area.innerHTML = `🎉 Đã ôn hết từ đến hạn và học hết từ mới của Bài ${data.currentLesson}!`;
+    area.innerHTML = `🎉 Đã ôn hết từ đến hạn và học hết từ mới của Bài ${data.currentLesson}!${tdDailySealsHtml(data, true)}`;
     return;
   }
   area.innerHTML = `
@@ -47,7 +52,56 @@ async function loadHomeQuickstart() {
       <span class="duo-stat-pill is-due">🔴 ${data.dueCount} cần ôn</span><span class="duo-stat-pill is-new">🆕 ${data.newInCurrentLesson} từ mới</span>
     </div>
     ${data.blockedByBacklog ? `<div style="font-size:.78rem;color:var(--muted);text-align:center;margin-bottom:10px;">⏳ Từ mới đang tạm khoá vì phạm vi đang chọn còn ${data.totalDue} thẻ đến hạn, nhiều hơn số lượt ôn còn lại hôm nay — tắt "Chỉ học từ mới sau khi hết backlog ôn tập" trong Cài đặt hằng ngày nếu muốn học từ mới ngay.</div>` : ''}
-    <button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">▶️ Bắt đầu học</button>`;
+    <button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">▶️ Bắt đầu học</button>
+    ${tdDailySealsHtml(data, true)}`;
+}
+
+// ── 3 Ấn triện Nhiệm vụ ngày (chỉ giao diện động lực, đọc từ số liệu thật hôm nay, không đụng FSRS) ──
+function dailySealStoreKey() {
+  const dk = typeof todayKey === 'function' ? todayKey() : new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+  return 'dailySeals_' + dk + '_' + (typeof authUsername !== 'undefined' && authUsername ? authUsername : '');
+}
+function getDailySealFlags() {
+  try { return JSON.parse(localStorage.getItem(dailySealStoreKey()) || '{}') || {}; } catch { return {}; }
+}
+function markDailySealFlag(kind) {
+  if (!kind || typeof authUsername === 'undefined' || !authUsername) return;
+  try {
+    const f = getDailySealFlags();
+    f[kind] = Date.now();
+    localStorage.setItem(dailySealStoreKey(), JSON.stringify(f));
+  } catch {}
+}
+function tdDailySealsHtml(data, compact) {
+  if (!data || !data.ok) return '';
+  const pr = data.progress || {};
+  const flags = getDailySealFlags();
+  const off = pr.officialAnswers || 0;
+  const prac = pr.practiceAnswers || 0;
+  const sec = pr.durationSeconds || 0;
+  const clearedDue = (data.dueCount || 0) === 0 && off > 0;
+  const s1 = off >= 5 || clearedDue;
+  const s2 = prac >= 1 || !!flags.listening || !!flags.convo;
+  const s3 = sec >= 300 || clearedDue;
+  const doneCount = (s1 ? 1 : 0) + (s2 ? 1 : 0) + (s3 ? 1 : 0);
+  const seals = [
+    { ch: '勤', name: 'Cần cù', desc: off >= 5 ? `${off} lượt ôn` : (clearedDue ? 'Hết thẻ đến hạn' : `${off}/5 lượt ôn`), ok: s1 },
+    { ch: '专', name: 'Chuyên tâm', desc: s2 ? 'Đã luyện thêm' : '1 bài luyện/nghe', ok: s2 },
+    { ch: '恒', name: 'Bền bỉ', desc: sec >= 300 ? `${Math.round(sec / 60)} phút thực` : (clearedDue ? 'Hoàn thành hôm nay' : `${Math.floor(sec / 60)}/5 phút thực`), ok: s3 },
+  ];
+  return `<div class="gf-seals-box${compact ? ' is-compact' : ''}">
+    <div class="gf-seals-head">
+      <span>🏮 Ấn triện hôm nay</span>
+      <span class="gf-seals-cnt${doneCount === 3 ? ' is-all' : ''}">${doneCount === 3 ? '✨ Viên mãn 3/3' : `${doneCount}/3 đã đóng mộc`}</span>
+    </div>
+    <div class="gf-seals-row">
+      ${seals.map(s => `<div class="gf-seal-card${s.ok ? ' is-stamped' : ''}">
+        <div class="gf-seal-stamp" aria-hidden="true">${s.ch}</div>
+        <div class="gf-seal-name">${s.name}</div>
+        <div class="gf-seal-desc">${s.desc}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
 }
 
 // ════════════════════════════════════════════════════
@@ -357,6 +411,7 @@ function renderTodayPanel(data) {
       ${mode('📖', 'Dùng từ trong câu<br><small>điền từ vào chỗ trống</small>', "skStartPractice('context')", true, '')}
       ${mode('🧩', 'Phân biệt từ dễ nhầm', "skStartPractice('confusable')", true, '')}
       ${mode('⏳', 'Kiểm tra sau khoảng nghỉ' + (b ? ` (${b.delayed})` : ''), "skStartPractice('delayed')", !b || b.delayed > 0, 'Chưa có từ đủ điều kiện')}
+      ${mode('📻', 'Nghe rảnh tay<br><small>podcast từ sắp quên</small>', "openHandsFreePodcast('atrisk')", true, '')}
     </div>
     <div class="gf-mode-cat">🖐 Chỉ chạm chọn — không gõ phím, không ghi âm</div>
     <div style="font-size:.7rem;color:var(--muted);margin-bottom:6px;line-height:1.4">Không cần bàn phím hay micro: chỉ chạm đáp án (phần ghép cặp nghe chỉ bật khi máy có giọng đọc). Luyện bổ sung, không đổi lịch FSRS. Câu 2 đáp án (A hay B?, Đúng/Sai) không cộng vào điểm kỹ năng.</div>
@@ -425,6 +480,7 @@ function renderTodayPanel(data) {
       : `<button class="btn btn-primary" style="width:100%;font-size:1.05rem;padding:15px;" onclick="ssEnterMode('review')">${hasDanglingReview ? '▶️ Tiếp tục phiên học' : '▶️ Bắt đầu học'}</button>`}
     ${summary}
     ${progressHtml}
+    ${tdDailySealsHtml(data, false)}
     ${quickPace}
     ${limitLine}
     ${capLine}

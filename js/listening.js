@@ -4,6 +4,14 @@
 'use strict';
 
 let ls2Items = [], ls2Idx = 0, ls2Revealed = false, ls2Plays = 0, ls2Clear = 0, ls2DbExamples = [], ls2DbScopeKey = '';
+// Chế độ Nghe rảnh tay (Podcast ôn từ sắp quên / theo bài / câu ví dụ) — không đổi lịch FSRS
+let ls2TabMode = 'active'; // 'active' | 'podcast'
+let podSource = 'atrisk';  // 'atrisk' | 'lesson' | 'sentences'
+let podItems = [], podIdx = 0, podPlaying = false, podRunId = 0;
+let podPauseSec = 2.5, podSlow = true, podRepeat2 = true, podReadVi = true, podHideText = false;
+let podSleepMin = 0, podSleepEndAt = 0, podSleepTimer = null, podWakeLock = null;
+let podPhase = 'idle'; // 'idle' | 'zh1' | 'wait' | 'reveal' | 'zh2'
+let podSourceNote = '';
 
 function ls2ScopeKey() {
   if (typeof lessonsAllMode !== 'undefined' && typeof selectedBookIds !== 'undefined') {
@@ -62,19 +70,50 @@ async function ls2FetchDbExamples() {
 }
 
 function renderListening() {
+  const modeBar = `<div class="gf-subtabs" role="tablist" style="margin-bottom:12px">
+    <button type="button" class="gf-subtab${ls2TabMode === 'active' ? ' active' : ''}" onclick="ls2SwitchMode('active')">🎧 Nghe câu chủ động</button>
+    <button type="button" class="gf-subtab${ls2TabMode === 'podcast' ? ' active' : ''}" onclick="ls2SwitchMode('podcast')">📻 Nghe rảnh tay (Podcast)</button>
+  </div>`;
+  if (ls2TabMode === 'podcast') {
+    return `<div class="panel">
+      ${modeBar}
+      <div class="panel-title">📻 Nghe rảnh tay · Podcast ôn từ</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Tự động phát lần lượt tiếng Trung → khoảng nghỉ cho não tự nhớ → hiện &amp; đọc nghĩa tiếng Việt → lặp lại. Phù hợp lúc đi đường, thư giãn hoặc trước khi ngủ. Luyện bổ sung, không đổi lịch FSRS.</div>
+      <div id="pod-body"></div>
+    </div>`;
+  }
   return `<div class="panel">
+    ${modeBar}
     <div class="panel-title">🎧 Luyện nghe câu theo phạm vi đang chọn</div>
     <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">Nghe câu rồi tự nhẩm nghĩa và chữ Hán. Nội dung &amp; Pinyin ẩn cho tới khi bạn bấm “Hiện nội dung”. Luyện bổ sung, không đổi lịch FSRS.</div>
     <div id="ls2-body"></div>
   </div>`;
 }
 
+function ls2SwitchMode(mode) {
+  if (mode === ls2TabMode) return;
+  podStop();
+  ls2TabMode = mode === 'podcast' ? 'podcast' : 'active';
+  if (typeof render === 'function') render();
+}
+
+function openHandsFreePodcast(src) {
+  if (src) podSource = src;
+  ls2TabMode = 'podcast';
+  if (typeof goTab === 'function') goTab('listening');
+}
+
 function bindListening() {
+  if (ls2TabMode === 'podcast') {
+    podInit();
+    return;
+  }
+  podStop();
   const key = ls2ScopeKey();
   if (!ls2Items.length || (ls2DbScopeKey && ls2DbScopeKey !== key)) ls2Load();
   ls2Draw();
   ls2FetchDbExamples().then((updated) => {
-    if (updated && typeof currentTab !== 'undefined' && currentTab === 'listening' && ls2Idx === 0 && ls2Plays <= 1) {
+    if (updated && typeof currentTab !== 'undefined' && currentTab === 'listening' && ls2TabMode === 'active' && ls2Idx === 0 && ls2Plays <= 1) {
       ls2Load();
       ls2Draw();
     }
@@ -173,5 +212,302 @@ function ls2Next() {
   ls2Idx = (ls2Idx + 1) % ls2Items.length;
   ls2Revealed = false;
   ls2Plays = 0;
+  if (typeof markDailySealFlag === 'function') markDailySealFlag('listening');
   ls2Draw();
+}
+
+// ════════════════════════════════════════════════════
+// CHẾ ĐỘ NGHE RẢNH TAY (PODCAST MODE)
+// ════════════════════════════════════════════════════
+function podEscape(s) {
+  return typeof escapeHtml === 'function' ? escapeHtml(s) : String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function podLoadSource(src) {
+  if (src) podSource = src;
+  podStop();
+  podItems = [];
+  podIdx = 0;
+  podSourceNote = '';
+  const body = document.getElementById('pod-body');
+  if (body) body.innerHTML = '<div class="study-empty">⏳ Đang chuẩn bị danh sách phát...</div>';
+
+  const allWords = (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) ? WORDS : [];
+  const wordByHz = new Map();
+  for (const w of allWords) if (w && w.hz && !wordByHz.has(w.hz)) wordByHz.set(w.hz, w);
+
+  if (podSource === 'atrisk') {
+    const picked = [], seen = new Set();
+    const addWord = (w, tag) => {
+      if (!w || !w.hz || seen.has(w.hz)) return;
+      seen.add(w.hz);
+      picked.push({ hz: w.hz, py: w.py || '', vi: w.vi || '', hanviet: w.hanviet || '', tag: tag || '' });
+    };
+    if (typeof isLoggedIn === 'function' && isLoggedIn()) {
+      try {
+        const dash = typeof fetchTodayDashboard === 'function' ? await fetchTodayDashboard(false) : null;
+        const atRisk = (dash && dash.ok && dash.memory && Array.isArray(dash.memory.atRiskWords)) ? dash.memory.atRiskWords : [];
+        for (const r of atRisk) {
+          const w = wordByHz.get(r.hz);
+          if (w) addWord(w, `Nguy cơ quên · nhớ ~${Math.round((r.r || 0) * 100)}%`);
+        }
+        if (picked.length < 15) {
+          const res = await fetch('/api/study/weak-words', { headers: typeof authHeaders === 'function' ? authHeaders() : {} });
+          const d = await res.json().catch(() => null);
+          if (d && d.ok && Array.isArray(d.words)) {
+            for (const w of d.words.slice(0, 25)) addWord(w, w.lapses ? `Quên ${w.lapses} lần` : 'Từ cần củng cố');
+          }
+        }
+      } catch {}
+    }
+    if (picked.length) {
+      podItems = picked.slice(0, 30);
+      podSourceNote = `${podItems.length} từ có nguy cơ quên / cần củng cố`;
+    } else {
+      const scoped = (typeof isLessonInSelection === 'function') ? allWords.filter(w => isLessonInSelection(w.l)) : allWords;
+      podItems = (scoped.length ? scoped : allWords).slice(0, 25).map(w => ({ hz: w.hz, py: w.py || '', vi: w.vi || '', hanviet: w.hanviet || '', tag: w.l ? `Bài ${w.l}` : '' }));
+      podSourceNote = 'Chưa có từ sắp quên — đang phát từ trong bài đã chọn';
+    }
+  } else if (podSource === 'lesson') {
+    const scoped = (typeof isLessonInSelection === 'function') ? allWords.filter(w => isLessonInSelection(w.l)) : allWords;
+    const pool = (scoped.length ? scoped : allWords).slice();
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    podItems = pool.slice(0, 40).map(w => ({ hz: w.hz, py: w.py || '', vi: w.vi || '', hanviet: w.hanviet || '', tag: w.l ? `Bài ${w.l}` : '' }));
+    podSourceNote = `${podItems.length} từ ngẫu nhiên trong phạm vi đang chọn`;
+  } else {
+    await ls2FetchDbExamples();
+    const pool = ls2Pool().slice();
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    podItems = pool.slice(0, 30).map(s => ({ hz: s.hz, py: s.py || '', vi: s.vi || '', hanviet: '', tag: s.l ? `Câu · Bài ${s.l}` : 'Câu ví dụ' }));
+    podSourceNote = `${podItems.length} câu ví dụ theo bài đang chọn`;
+  }
+  podRender();
+}
+
+function podInit() {
+  if (!podItems.length) podLoadSource(podSource);
+  else podRender();
+}
+
+async function podAcquireWakeLock() {
+  try {
+    if ('wakeLock' in navigator && !podWakeLock) {
+      podWakeLock = await navigator.wakeLock.request('screen');
+      podWakeLock.addEventListener('release', () => { podWakeLock = null; });
+    }
+  } catch {}
+}
+function podReleaseWakeLock() {
+  try { if (podWakeLock) { podWakeLock.release(); podWakeLock = null; } } catch {}
+}
+
+function podSetSleep(min) {
+  podSleepMin = Number(min) || 0;
+  if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
+  podSleepEndAt = 0;
+  if (podSleepMin > 0 && podPlaying) podArmSleepTimer();
+  podRender();
+}
+function podArmSleepTimer() {
+  if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
+  if (podSleepMin <= 0) { podSleepEndAt = 0; return; }
+  podSleepEndAt = Date.now() + podSleepMin * 60000;
+  podSleepTimer = setTimeout(() => {
+    podStop();
+    const st = document.getElementById('pod-phase');
+    if (st) st.textContent = `🌙 Đã hết hẹn giờ ${podSleepMin} phút — tự động dừng.`;
+  }, podSleepMin * 60000);
+}
+
+function podStop() {
+  podRunId++;
+  podPlaying = false;
+  podPhase = 'idle';
+  if (podSleepTimer) { clearTimeout(podSleepTimer); podSleepTimer = null; }
+  podSleepEndAt = 0;
+  podReleaseWakeLock();
+  if (typeof ttsStop === 'function') { try { ttsStop(); } catch {} }
+  if ('speechSynthesis' in window) { try { speechSynthesis.cancel(); } catch {} }
+  podUpdatePlayUi();
+}
+
+function podSleep(ms, runId) {
+  return new Promise((resolve) => {
+    if (runId !== podRunId) return resolve(false);
+    const t = setTimeout(() => resolve(runId === podRunId), ms);
+    const iv = setInterval(() => {
+      if (runId !== podRunId) { clearTimeout(t); clearInterval(iv); resolve(false); }
+    }, 150);
+    setTimeout(() => clearInterval(iv), ms + 200);
+  });
+}
+
+function podSpeakZh(text, slow, runId) {
+  return new Promise((resolve) => {
+    if (runId !== podRunId) return resolve(false);
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(runId === podRunId); } };
+    const safety = setTimeout(finish, 12000);
+    const hooks = { end: () => { clearTimeout(safety); finish(); }, error: () => { clearTimeout(safety); finish(); } };
+    if (slow && typeof speakSlow === 'function') speakSlow(text, hooks);
+    else if (typeof speak === 'function') speak(text, hooks);
+    else { clearTimeout(safety); finish(); }
+  });
+}
+
+function podSpeakVi(text, runId) {
+  return new Promise((resolve) => {
+    if (!podReadVi || !text || runId !== podRunId || !('speechSynthesis' in window)) return resolve(runId === podRunId);
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text).replace(/\([^)]*\)/g, '').slice(0, 120));
+      u.lang = 'vi-VN';
+      const viVoice = speechSynthesis.getVoices().find(v => v.lang && v.lang.toLowerCase().startsWith('vi'));
+      if (viVoice) u.voice = viVoice;
+      u.rate = 1.0;
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(runId === podRunId); } };
+      const safety = setTimeout(finish, 7000);
+      u.onend = () => { clearTimeout(safety); finish(); };
+      u.onerror = () => { clearTimeout(safety); finish(); };
+      speechSynthesis.speak(u);
+    } catch { resolve(runId === podRunId); }
+  });
+}
+
+function podTogglePlay() {
+  if (!podItems.length) return;
+  if (podPlaying) { podStop(); return; }
+  podPlaying = true;
+  podAcquireWakeLock();
+  if (podSleepMin > 0) podArmSleepTimer();
+  if (typeof markDailySealFlag === 'function') markDailySealFlag('listening');
+  podLoop(++podRunId);
+}
+
+function podJump(delta) {
+  if (!podItems.length) return;
+  const wasPlaying = podPlaying;
+  podStop();
+  podIdx = (podIdx + delta + podItems.length) % podItems.length;
+  podRender();
+  if (wasPlaying) podTogglePlay();
+}
+
+async function podLoop(runId) {
+  while (runId === podRunId && podPlaying && podItems.length) {
+    if (typeof currentTab !== 'undefined' && currentTab !== 'listening') { podStop(); return; }
+    const item = podItems[podIdx];
+    if (!item) break;
+
+    podPhase = 'zh1';
+    podRender();
+    if (!(await podSpeakZh(item.hz, podSlow, runId))) break;
+
+    podPhase = 'wait';
+    podUpdatePhaseUi(`🤔 Tự nhẩm nghĩa trong ${podPauseSec} giây...`, false);
+    if (!(await podSleep(Math.round(podPauseSec * 1000), runId))) break;
+
+    podPhase = 'reveal';
+    podUpdatePhaseUi('📖 Đáp án & nghĩa tiếng Việt', true);
+    if (podReadVi && item.vi) {
+      if (!(await podSpeakVi(item.vi, runId))) break;
+    } else {
+      if (!(await podSleep(1500, runId))) break;
+    }
+
+    if (podRepeat2) {
+      podPhase = 'zh2';
+      podUpdatePhaseUi('🔁 Nhắc lại tiếng Trung', true);
+      if (!(await podSpeakZh(item.hz, false, runId))) break;
+    }
+    if (!(await podSleep(850, runId))) break;
+
+    podIdx = (podIdx + 1) % podItems.length;
+  }
+  if (runId === podRunId) {
+    podPlaying = false;
+    podPhase = 'idle';
+    podReleaseWakeLock();
+    podUpdatePlayUi();
+  }
+}
+
+function podUpdatePlayUi() {
+  const btn = document.getElementById('pod-play-btn');
+  if (btn) btn.textContent = podPlaying ? '⏸ Tạm dừng' : '▶️ Bắt đầu phát';
+  const ph = document.getElementById('pod-phase');
+  if (ph && !podPlaying && podPhase === 'idle') ph.textContent = 'Sẵn sàng phát · Bấm ▶️ để nghe rảnh tay';
+}
+
+function podUpdatePhaseUi(label, showAnswer) {
+  const ph = document.getElementById('pod-phase');
+  if (ph) ph.textContent = label;
+  const ans = document.getElementById('pod-answer-box');
+  if (ans) ans.style.opacity = showAnswer ? '1' : '0.12';
+}
+
+function podRender() {
+  const body = document.getElementById('pod-body');
+  if (!body) return;
+  const srcChips = [
+    ['atrisk', '⚠️ Từ sắp quên'],
+    ['lesson', '📚 Từ bài đang chọn'],
+    ['sentences', '💬 Câu ví dụ'],
+  ].map(([id, lbl]) => `<button type="button" class="dash-chip${podSource === id ? ' sel' : ''}" onclick="podLoadSource('${id}')">${lbl}</button>`).join('');
+
+  if (!podItems.length) {
+    body.innerHTML = `<div class="dash-filter-row" style="margin-bottom:12px">${srcChips}</div>
+      <div class="study-empty">Chưa có mục nào để phát. Hãy chọn thêm bài học ở Trang chủ.</div>`;
+    return;
+  }
+  const cur = podItems[podIdx] || podItems[0];
+  const showAns = !podPlaying || podPhase === 'reveal' || podPhase === 'zh2';
+  const phaseLabel = !podPlaying ? 'Sẵn sàng phát · Bấm ▶️ để nghe rảnh tay'
+    : podPhase === 'zh1' ? '🔊 Đang đọc tiếng Trung...'
+    : podPhase === 'wait' ? `🤔 Tự nhẩm nghĩa trong ${podPauseSec} giây...`
+    : podPhase === 'reveal' ? '📖 Đáp án & nghĩa tiếng Việt'
+    : '🔁 Nhắc lại tiếng Trung';
+  const remainSleep = podSleepEndAt > Date.now() ? ` · 🌙 còn ~${Math.max(1, Math.ceil((podSleepEndAt - Date.now()) / 60000))}p` : '';
+
+  body.innerHTML = `
+    <div class="dash-filter-row" style="margin-bottom:10px">${srcChips}</div>
+    <div style="font-size:.74rem;color:var(--muted);text-align:center;margin-bottom:10px">${podEscape(podSourceNote)} · Mục <b>${podIdx + 1}/${podItems.length}</b>${remainSleep}</div>
+    <div class="gf-pod-stage">
+      ${cur.tag ? `<div class="gf-pod-tag">${podEscape(cur.tag)}</div>` : ''}
+      <div class="gf-pod-hz">${podHideText && podPlaying && !showAns ? '• • •' : podEscape(cur.hz)}</div>
+      <div id="pod-answer-box" class="gf-pod-ans" style="opacity:${showAns ? '1' : '0.12'};transition:opacity .25s">
+        ${cur.py ? `<div class="gf-pod-py">${podEscape(cur.py)}</div>` : ''}
+        <div class="gf-pod-vi">${podEscape(cur.vi)}</div>
+        ${cur.hanviet ? `<div class="gf-pod-hv">Hán Việt: ${podEscape(cur.hanviet)}</div>` : ''}
+      </div>
+      <div id="pod-phase" class="gf-pod-phase">${phaseLabel}</div>
+      <div class="gf-pod-controls">
+        <button type="button" class="btn btn-sm" onclick="podJump(-1)" aria-label="Từ trước">⏮ Trước</button>
+        <button type="button" id="pod-play-btn" class="btn btn-primary" onclick="podTogglePlay()">${podPlaying ? '⏸ Tạm dừng' : '▶️ Bắt đầu phát'}</button>
+        <button type="button" class="btn btn-sm" onclick="podJump(1)" aria-label="Từ sau">Tiếp ⏭</button>
+      </div>
+    </div>
+    <div class="gf-pod-opts">
+      <label class="gf-pod-opt"><span>⏳ Nghỉ nhớ:</span>
+        <select onchange="podPauseSec=Number(this.value)">
+          ${[1.5, 2.5, 4, 6].map(s => `<option value="${s}"${podPauseSec === s ? ' selected' : ''}>${s} giây</option>`).join('')}
+        </select>
+      </label>
+      <label class="gf-pod-opt"><span>🌙 Hẹn tắt:</span>
+        <select onchange="podSetSleep(this.value)">
+          ${[[0, 'Không'], [5, '5 phút'], [10, '10 phút'], [20, '20 phút'], [30, '30 phút']].map(([m, t]) => `<option value="${m}"${podSleepMin === m ? ' selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </label>
+      <label class="gf-pod-chk"><input type="checkbox" ${podSlow ? 'checked' : ''} onchange="podSlow=this.checked"> 🐢 Đọc chậm lần đầu</label>
+      <label class="gf-pod-chk"><input type="checkbox" ${podRepeat2 ? 'checked' : ''} onchange="podRepeat2=this.checked"> 🔁 Nhắc lại tiếng Trung</label>
+      <label class="gf-pod-chk"><input type="checkbox" ${podReadVi ? 'checked' : ''} onchange="podReadVi=this.checked"> 🇻🇳 Đọc nghĩa tiếng Việt</label>
+      <label class="gf-pod-chk"><input type="checkbox" ${podHideText ? 'checked' : ''} onchange="podHideText=this.checked;podRender()"> 🙈 Ẩn chữ lúc nghe</label>
+    </div>`;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && podPlaying) podAcquireWakeLock();
+  });
 }

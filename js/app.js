@@ -144,3 +144,32 @@ bootPromise.then(async () => {
   });
 })();
 
+// ── PWA: đăng ký Service Worker + nút cài ra màn hình chính ──
+let _pwaDeferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _pwaDeferredPrompt = e;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+  _pwaDeferredPrompt = null;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+});
+async function triggerPwaInstall() {
+  if (!_pwaDeferredPrompt) return;
+  try {
+    _pwaDeferredPrompt.prompt();
+    await _pwaDeferredPrompt.userChoice;
+  } catch {}
+  _pwaDeferredPrompt = null;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+}
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+

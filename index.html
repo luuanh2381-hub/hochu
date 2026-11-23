@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#B9382C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="学中文">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/icons/app-icon.svg">
+<link rel="apple-touch-icon" href="/icons/app-icon.svg">
 <title>学中文 · Học Tiếng Trung</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -164,6 +171,7 @@
     <div class="auth-title" id="account-menu-name">👤</div>
     <button class="auth-submit duo-btn-blue" style="margin-top:12px" onclick="closeAccountMenu(); openChangePassword();">🔑 Đổi mật khẩu</button>
     <button class="auth-submit duo-btn-purple" style="margin-top:10px" onclick="closeAccountMenu(); openOptimizerModal();">🧠 FSRS Optimizer</button>
+    <button class="auth-submit duo-btn-green" id="pwa-install-btn" style="margin-top:10px;display:none;" onclick="closeAccountMenu(); triggerPwaInstall();">📱 Cài ra màn hình chính</button>
     <button class="auth-submit duo-btn-orange" style="margin-top:10px" onclick="openDangerConfirm('fsrs-reset')">🔄 Reset FSRS</button>
     <button class="auth-submit duo-btn-red" style="margin-top:10px" onclick="openDangerConfirm('wipe-data')">🗑️ Xoá toàn bộ dữ liệu học tập</button>
     <button class="auth-submit duo-btn-red" style="margin-top:10px" onclick="closeAccountMenu(); if(confirm('Đăng xuất khỏi tài khoản này?')) authLogout();">🚪 Đăng xuất</button>

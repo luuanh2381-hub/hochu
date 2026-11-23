@@ -50,6 +50,11 @@ function renderStats() {
   </div>
 
   <div class="panel">
+    <div class="panel-title">🗺️ Bản đồ tiến độ HSK 1–4</div>
+    <div id="dash-hsk"><div class="study-empty">⏳ Đang tính tiến độ HSK...</div></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-title">📈 Hoạt động học tập</div>
     <div class="dash-filter-row" id="dash-range-chips">${rangeChips}</div>
     <div id="dash-line"><div class="study-empty">⏳ Đang tải...</div></div>
@@ -81,15 +86,20 @@ async function bindStats() {
     : WORDS.filter(w => selectedLessons.has(w.l));
 
   try {
-    const [knownRes, weakRes, fsrsStatsRes, dashRes] = await Promise.all([
+    const [knownRes, weakRes, fsrsStatsRes, dashRes, hskRes] = await Promise.all([
       statLessons.length
         ? fetch('/api/study/known-by-lesson?lessons=' + statLessons.join(','), { headers: authHeaders() }).then(r => r.json())
         : Promise.resolve({ ok: true, known: {} }),
       fetch('/api/study/weak-words', { headers: authHeaders() }).then(r => r.json()),
       fetch('/api/fsrs/stats', { headers: authHeaders() }).then(r => r.json()),
       fetch('/api/study/dashboard', { headers: authHeaders() }).then(r => r.json()),
+      fetch('/api/study/hsk-progress', { headers: authHeaders() }).then(r => r.json()).catch(() => ({ ok: false })),
     ]);
     if (currentTab !== 'stats') return; // user đã rời tab trong lúc chờ tải
+    if (hskRes && hskRes.ok && hskRes.statusByHz) {
+      window._hskStatusByHz = hskRes.statusByHz;
+    }
+    renderHskTracker();
 
     const knownByLesson = (knownRes.ok && knownRes.known) || {};
     const fs = fsrsStatsRes.ok ? fsrsStatsRes : {};
@@ -358,4 +368,93 @@ async function bindDifficult() {
   } catch (e) {
     if (listEl) listEl.innerHTML = `⚠️ Không tải được: ${e.message}`;
   }
+}
+
+// ════════════════════════════════════════════════════
+// BẢN ĐỒ TIẾN ĐỘ HSK 1–4 (đối chiếu HSK_OFFICIAL với dữ liệu FSRS thật)
+// ════════════════════════════════════════════════════
+let _hskExpandedLevel = null; // 1 | 2 | 3 | 4 | null
+let _hskFilterMode = 'unseen'; // 'unseen' | 'learning' | 'mature'
+
+function hskToggleLevel(lv) {
+  _hskExpandedLevel = (_hskExpandedLevel === lv) ? null : lv;
+  renderHskTracker();
+}
+function hskSetFilter(f) {
+  _hskFilterMode = f;
+  renderHskTracker();
+}
+function renderHskTracker() {
+  const el = document.getElementById('dash-hsk');
+  if (!el) return;
+  if (typeof HSK_OFFICIAL === 'undefined' || !HSK_OFFICIAL) {
+    el.innerHTML = '<div class="study-empty">Chưa có danh mục từ HSK chuẩn.</div>';
+    return;
+  }
+  const statusMap = (typeof window !== 'undefined' && window._hskStatusByHz) ? window._hskStatusByHz : {};
+  const wordByHz = new Map();
+  if (typeof WORDS !== 'undefined' && Array.isArray(WORDS)) {
+    for (const w of WORDS) if (w && w.hz && !wordByHz.has(w.hz)) wordByHz.set(w.hz, w);
+  }
+  const levels = [1, 2, 3, 4];
+  const cards = levels.map(lv => {
+    const list = [...new Set(HSK_OFFICIAL[lv] || [])];
+    let mature = 0, learning = 0, unseen = 0;
+    for (const hz of list) {
+      const st = statusMap[hz];
+      if (st === 'mature') mature++;
+      else if (st === 'learning') learning++;
+      else unseen++;
+    }
+    const total = list.length || 1;
+    const matPct = Math.round((mature / total) * 100);
+    const lrnPct = Math.round((learning / total) * 100);
+    const covPct = Math.round(((mature + learning) / total) * 100);
+    const active = _hskExpandedLevel === lv;
+    return `<button type="button" class="gf-hsk-card${active ? ' is-open' : ''}" onclick="hskToggleLevel(${lv})">
+      <div class="gf-hsk-head">
+        <span class="gf-hsk-lv">HSK ${lv}</span>
+        <span class="gf-hsk-pct">${covPct}% <small>(${mature + learning}/${list.length})</small></span>
+      </div>
+      <div class="gf-hsk-bar">
+        <div class="gf-hsk-seg is-mature" style="width:${matPct}%"></div>
+        <div class="gf-hsk-seg is-learn" style="width:${lrnPct}%"></div>
+      </div>
+      <div class="gf-hsk-sub"><span>🟢 Vững ${mature}</span><span>🟡 Đang học ${learning}</span><span>⚪ Chưa ${unseen}</span></div>
+    </button>`;
+  }).join('');
+
+  let drawer = '';
+  if (_hskExpandedLevel && HSK_OFFICIAL[_hskExpandedLevel]) {
+    const list = [...new Set(HSK_OFFICIAL[_hskExpandedLevel])];
+    const groups = { unseen: [], learning: [], mature: [] };
+    for (const hz of list) {
+      const st = statusMap[hz];
+      if (st === 'mature') groups.mature.push(hz);
+      else if (st === 'learning') groups.learning.push(hz);
+      else groups.unseen.push(hz);
+    }
+    const items = groups[_hskFilterMode] || [];
+    const shown = items.slice(0, 60);
+    drawer = `<div class="gf-hsk-drawer">
+      <div class="gf-hsk-dtabs">
+        <button type="button" class="dash-chip${_hskFilterMode === 'unseen' ? ' sel' : ''}" onclick="hskSetFilter('unseen')">⚪ Chưa học (${groups.unseen.length})</button>
+        <button type="button" class="dash-chip${_hskFilterMode === 'learning' ? ' sel' : ''}" onclick="hskSetFilter('learning')">🟡 Đang học (${groups.learning.length})</button>
+        <button type="button" class="dash-chip${_hskFilterMode === 'mature' ? ' sel' : ''}" onclick="hskSetFilter('mature')">🟢 Đã vững (${groups.mature.length})</button>
+      </div>
+      ${shown.length ? `<div class="gf-hsk-chips">${shown.map(hz => {
+        const w = wordByHz.get(hz);
+        const title = w ? `${w.hz} (${w.py}) — ${w.vi}` : hz;
+        return `<span class="gf-hsk-word" title="${escapeHtml(title)}">
+          <button type="button" class="gf-hsk-wbtn" onclick="speak('${escapeJsAttr(hz)}')">${escapeHtml(hz)}${w && w.vi ? ` <small>${escapeHtml(w.vi.split(/[;,]/)[0].slice(0, 14))}</small>` : ''}</button>
+          <button type="button" class="gf-hsk-net" onclick="if(typeof openHanziNetwork==='function')openHanziNetwork('${escapeJsAttr(hz)}')" title="Xem sơ đồ họ chữ">🕸️</button>
+        </span>`;
+      }).join('')}</div>` : '<div style="font-size:.8rem;color:var(--muted);padding:8px 0;text-align:center">Không có từ nào trong mục này.</div>'}
+      ${items.length > shown.length ? `<div style="font-size:.72rem;color:var(--muted);text-align:center;margin-top:6px">Đang hiện ${shown.length}/${items.length} từ đầu tiên của HSK ${_hskExpandedLevel}.</div>` : ''}
+    </div>`;
+  }
+
+  el.innerHTML = `<div class="gf-hsk-grid">${cards}</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-top:6px">Bấm vào từng cấp HSK để xem danh sách từ chưa học / đang học / đã vững (ổn định ≥ 21 ngày theo FSRS).</div>
+    ${drawer}`;
 }

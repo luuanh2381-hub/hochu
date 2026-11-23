@@ -1,0 +1,20 @@
+{
+  "name": "学中文 · Học Tiếng Trung",
+  "short_name": "学中文",
+  "description": "Ứng dụng học từ vựng, nghe nói và ôn tập tiếng Trung thông minh với FSRS-6",
+  "lang": "vi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#B9382C",
+  "background_color": "#F7F3EA",
+  "icons": [
+    {
+      "src": "/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

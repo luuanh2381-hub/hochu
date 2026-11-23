@@ -1578,6 +1578,16 @@ app.post('/api/study/session/snapshot', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+// CHỈ ĐỌC: trả trạng thái học (mature / learning) theo từng từ để dựng Bản đồ tiến độ HSK 1-4 & Sơ đồ họ chữ.
+app.get('/api/study/hsk-progress', async (req, res) => {
+  const authed = await requireAuth(req, res);
+  if (!authed) return;
+  try {
+    const statusByHz = await sessionSnapshot.getUserStudiedStatusMap(authed.username);
+    res.json({ ok: true, statusByHz });
+  } catch (e) { fail(res, e); }
+});
+
 app.post('/api/study/session/heartbeat', async (req, res) => {
   const authed = await requireAuth(req, res);
   if (!authed) return;
